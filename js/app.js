@@ -157,22 +157,22 @@ function commit(row) {
 }
 
 // The real work. The shimmer runs exactly as long as the request does.
-async function estimate(e, quiet = false) {
+async function estimate(e, quiet = false, fresh = false) {
   const tok = (tokens.get(e.id) || 0) + 1; tokens.set(e.id, tok);
   const text = e.text;
   if (!quiet) { e.status = 'pending'; const r = rows.get(e.id); if (r) paint(r, false); renderTotals(); }
-  const res = await getEstimate(text, getLang());
+  const res = await getEstimate(text, getLang(), fresh);
   const live = locate(e.id);
   if (!live || tokens.get(e.id) !== tok || live.text !== text) return;
   const real = res.source === 'ai' || res.source === 'cache';
   if (quiet && !real) return; // still no AI: keep what we have
-  live.items = res.items;
+  live.items = res.items; live.why = real ? undefined : res.reason;
   live.status = real ? (res.notFood ? 'unknown' : 'done') : res.source === 'table' ? 'rough' : 'waiting';
   save();
   const row = rows.get(e.id);
   if (row) {
     paint(row, true);
-    if (live.items.length) { row.classList.remove('landed'); void row.offsetWidth; row.classList.add('landed'); }
+    if (live.items.length) { row.classList.remove('landed'); void row.offsetWidth; row.classList.add('landed'); clearTimeout(row._land); row._land = setTimeout(() => row.classList.remove('landed'), 1200); }
   }
   renderTotals();
   if (live.items.length) sfx('land');
@@ -186,7 +186,7 @@ function paint(row, animate) {
   row.classList.toggle('waiting', e.status === 'waiting');
   row.classList.toggle('unknown', e.status === 'unknown');
   row.classList.toggle('has-sub', has && e.status !== 'pending');
-  row.querySelector('.state span').textContent = t(e.status === 'waiting' ? 'waiting' : e.status === 'unknown' ? 'unknown' : 'estimating');
+  row.querySelector('.state span').textContent = t(e.status === 'waiting' ? (['no_key', 'bad_key', 'rate_limited', 'offline'].includes(e.why) ? 'why_' + e.why : 'waiting') : e.status === 'unknown' ? 'unknown' : 'estimating');
   if (!has) return;
   const tot = totalsOf([e]);
   const grams = e.items.reduce((s, it) => s + (it.grams || 0), 0) * m;
@@ -335,6 +335,78 @@ function resume() {
   }
 }
 
+// ---------- right-click menu: what's in a line, and what you can do with it ----------
+const ICON = {
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  portion: '<path d="M4 8h16M4 16h16"/><circle cx="9" cy="8" r="2.2" fill="var(--card)"/><circle cx="15" cy="16" r="2.2" fill="var(--card)"/>',
+  again: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/>',
+  move: '<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>',
+  del: '<path d="M4 7h16"/><path d="M9.5 7V5h5v2"/><path d="M6.5 7l1 12a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2l1-12"/>',
+};
+const menuEl = document.createElement('div'); menuEl.id = 'menu'; document.body.append(menuEl);
+const closeMenu = () => menuEl.classList.remove('open');
+
+function openMenu(row, x, y) {
+  const e = row._e && locate(row._e.id); if (!e) return;
+  const tot = totalsOf([e]), has = e.items?.length > 0;
+  const parts = [['protein', tot.protein, 4], ['carbs', tot.carbs, 4], ['fat', tot.fat, 9]];
+  const sum = parts.reduce((a, p) => a + p[1] * p[2], 0) || 1;
+  const onToday = (state.days[dayKey(0)] || []).includes(e);
+  const item = (act, icon, label, cls = '') => `<button type="button" class="it ${cls}" data-act="${act}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICON[icon]}</svg>${label}</button>`;
+  menuEl.innerHTML = (has ? `
+    <div class="m-head"><b>${num(tot.kcal)}<small>kcal</small></b><span></span></div>
+    <div class="m-bar">${parts.map(([k, g, f], i) => `<i class="c-${k}" style="flex:${Math.max(g * f, 0.001)};animation-delay:${i * 70}ms"></i>`).join('')}</div>
+    <div class="m-legend">${parts.map(([k, g, f]) => `<div><i class="c-${k}"></i><span>${t(k)}</span><b>${num(g)} g</b><em>${Math.round((g * f / sum) * 100)}%</em></div>`).join('')}</div>
+    ${e.items.length > 1 ? `<div class="m-items">${e.items.map(() => '<div><span></span><b></b></div>').join('')}</div>` : ''}
+    <div class="sep"></div>` : '') +
+    item('edit', 'edit', t('mEdit')) + (has ? item('portion', 'portion', t('mPortion')) : '') + item('again', 'again', t('mAgain')) +
+    item('move', 'move', t(onToday ? 'mToTomorrow' : 'mToToday')) + '<div class="sep"></div>' + item('del', 'del', t('mDelete'), 'danger');
+  if (has) {
+    menuEl.querySelector('.m-head span').textContent = e.text;
+    menuEl.querySelectorAll('.m-items div').forEach((d, i) => {
+      const it = e.items[i], m = e.mult || 1;
+      d.firstChild.textContent = it.name; d.lastChild.textContent = `${num(it.calories * m)} kcal`;
+    });
+  }
+  menuEl.onclick = ev => {
+    const b = ev.target.closest('.it'); if (!b) return;
+    closeMenu();
+    const act = b.dataset.act, live = locate(e.id); if (!live) return;
+    if (act === 'edit') focusRow(row);
+    else if (act === 'portion') { row.classList.add('adjusting'); sfx('pop'); }
+    else if (act === 'again') estimate(live, false, true);
+    else if (act === 'del') { row.querySelector('.txt').value = ''; commit(row); }
+    else if (act === 'move') {
+      pushUndo();
+      const from = Object.keys(state.days).find(k => state.days[k].includes(live)), to = dayKey(onToday ? 1 : 0);
+      state.days[from] = state.days[from].filter(z => z !== live); list(to).push(live);
+      save(); renderLog(); renderTotals(); sfx('pop');
+      toast(t(onToday ? 'movedTomorrow' : 'movedToday'), { label: t('undo'), kbd: '⌘Z', run: undo });
+    }
+  };
+  menuEl.classList.remove('open'); menuEl.style.left = '0px'; menuEl.style.top = '0px';
+  const w = menuEl.offsetWidth, h = menuEl.offsetHeight;
+  const left = Math.max(8, Math.min(x, innerWidth - w - 8)), top = Math.max(8, Math.min(y, innerHeight - h - 8));
+  menuEl.style.left = left + 'px'; menuEl.style.top = top + 'px';
+  menuEl.style.transformOrigin = `${x - left}px ${y - top}px`;
+  void menuEl.offsetWidth; menuEl.classList.add('open'); sfx('pop');
+}
+
+$('log').addEventListener('contextmenu', ev => {
+  const row = ev.target.closest('.row:not(.draft):not(.out)'); if (!row || !row._e) return;
+  ev.preventDefault(); openMenu(row, ev.clientX, ev.clientY);
+});
+let pressT;
+$('log').addEventListener('touchstart', ev => { // long-press on a phone
+  const row = ev.target.closest('.row:not(.draft):not(.out)'); if (!row || !row._e) return;
+  const p = ev.touches[0]; clearTimeout(pressT);
+  pressT = setTimeout(() => { document.activeElement?.blur(); openMenu(row, p.clientX, p.clientY); }, 520);
+}, { passive: true });
+for (const n of ['touchmove', 'touchend', 'touchcancel']) $('log').addEventListener(n, () => clearTimeout(pressT), { passive: true });
+document.addEventListener('pointerdown', ev => { if (!ev.target.closest('#menu')) closeMenu(); });
+$('scroll').addEventListener('scroll', closeMenu, { passive: true });
+addEventListener('resize', closeMenu); addEventListener('blur', closeMenu);
+
 // ---------- wiring ----------
 $('days').addEventListener('click', ev => { const b = ev.target.closest('button'); if (b && b.dataset.view !== view) { sfx('pop'); setView(b.dataset.view); } });
 $('setbtn').addEventListener('click', openSettings);
@@ -355,6 +427,7 @@ document.addEventListener('keydown', ev => {
     }
     ev.preventDefault(); ev.shiftKey ? redo() : undo();
   } else if (mod && ev.key === ',') { ev.preventDefault(); openSettings(); }
+  else if (ev.key === 'Escape' && menuEl.classList.contains('open')) closeMenu();
   else if (ev.key === 'Escape' && settingsOpen()) closeSettings();
   else if (!typing && !mod && !ev.altKey && !settingsOpen() && (ev.key === 'n' || ev.key === 'N' || ev.key === '/')) {
     ev.preventDefault(); if (view === 'weekly') setView('today'); focusRow(draftRow());

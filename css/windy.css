@@ -317,3 +317,58 @@ main::-webkit-scrollbar { width: 0; }
 }
 .row.draft { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 400px) { .b-kcal .big { font-size: 16.5px; } .ring { width: 40px; height: 40px; } .bar { gap: 8px; } }
+
+/* the glow: a soft green light flows under the words while the AI works,
+   and sweeps across once more the moment the answer lands */
+.txt, .sub { position: relative; z-index: 1; }
+.l::before {
+  content: ""; position: absolute; inset: -7px -12px; border-radius: 14px; pointer-events: none; opacity: 0; z-index: 0;
+  background: linear-gradient(100deg, transparent 15%, var(--green-soft) 38%, var(--glow) 50%, var(--green-soft) 62%, transparent 85%);
+  background-size: 260% 100%; background-repeat: no-repeat; filter: blur(7px);
+}
+:root { --glow: rgba(79, 160, 126, .38); }
+:root[data-mode="dark"] { --glow: rgba(115, 195, 160, .4); }
+.row.thinking .l::before { opacity: 1; animation: glowflow 1.7s linear infinite; transition: opacity .3s; }
+.row.landed .l::before { animation: glowonce 1s cubic-bezier(.3, 0, .2, 1) both; }
+@keyframes glowflow { from { background-position: 160% 0; } to { background-position: -60% 0; } }
+@keyframes glowonce { 0% { opacity: 0; background-position: 160% 0; } 25% { opacity: 1; } 100% { opacity: 0; background-position: -60% 0; } }
+.row.thinking .txt { animation: breathe 1.7s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: .6; } }
+.row.landed .sub { animation: land .55s var(--spring-soft) both; animation-delay: .08s; }
+
+/* ---------- right-click menu ---------- */
+:root { --c-protein: #4FA07E; --c-carbs: #D9B36C; --c-fat: #C98F7C; }
+:root[data-mode="dark"] { --c-protein: #73C3A0; --c-carbs: #DDBB7A; --c-fat: #D39A88; }
+.c-protein { background: var(--c-protein); } .c-carbs { background: var(--c-carbs); } .c-fat { background: var(--c-fat); }
+#menu {
+  position: fixed; z-index: 70; width: 264px; padding: 6px; border-radius: 16px; background: var(--card);
+  box-shadow: 0 12px 36px -8px rgba(20, 16, 8, .28), 0 0 0 .5px rgba(0, 0, 0, .07);
+  opacity: 0; transform: scale(.92); pointer-events: none; transition: opacity .15s, transform .32s var(--spring-soft);
+  user-select: none; -webkit-user-select: none;
+}
+:root[data-mode="dark"] #menu { background: #2A2826; box-shadow: 0 12px 36px -8px rgba(0, 0, 0, .6), 0 0 0 .5px rgba(255, 255, 255, .08); }
+#menu.open { opacity: 1; transform: none; pointer-events: auto; }
+.m-head { display: flex; align-items: baseline; gap: 10px; padding: 10px 10px 0; }
+.m-head b { font: 650 22px/1.1 var(--ui); letter-spacing: -.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.m-head b small { font: 500 12px/1 var(--ui); color: var(--soft); margin-left: 3px; }
+.m-head span { font-size: 12.5px; color: var(--soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-bar { display: flex; gap: 3px; height: 8px; margin: 12px 10px 10px; }
+.m-bar i { display: block; border-radius: 4px; min-width: 3px; transform-origin: left; }
+#menu.open .m-bar i { animation: mgrow .6s var(--spring) both; }
+@keyframes mgrow { from { transform: scaleX(0); opacity: 0; } }
+.m-legend { padding: 0 10px 6px; }
+.m-legend div { display: flex; align-items: center; gap: 8px; padding: 3.5px 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.m-legend i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.m-legend span { flex: 1; }
+.m-legend b { font-weight: 600; }
+.m-legend em { font-style: normal; color: var(--soft); width: 36px; text-align: right; }
+.m-items { margin: 2px 10px 6px; padding-top: 8px; border-top: 1px solid rgba(127, 127, 127, .14); }
+.m-items div { display: flex; justify-content: space-between; gap: 12px; padding: 2.5px 0; font-size: 12.5px; color: var(--soft); font-variant-numeric: tabular-nums; }
+.m-items span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-items b { font-weight: 500; white-space: nowrap; }
+#menu .sep { height: 1px; background: rgba(127, 127, 127, .14); margin: 5px 6px; }
+#menu .it { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; border-radius: 10px; padding: 8px 10px; font: 500 13.5px/1.2 var(--ui); color: var(--ink); cursor: pointer; text-align: left; }
+#menu .it svg { color: var(--soft); flex: none; }
+#menu .it:hover { background: rgba(127, 127, 127, .12); }
+#menu .it.danger, #menu .it.danger svg { color: #D5584F; }
+#menu .it.danger:hover { background: rgba(213, 88, 79, .1); }

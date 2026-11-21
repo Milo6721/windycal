@@ -21,10 +21,11 @@ const clean = it => ({
 });
 
 // source: 'cache' | 'ai' (a real answer), 'table' (rough), 'none' (nothing yet, retry later)
-export async function getEstimate(text, lang) {
+export async function getEstimate(text, lang, fresh = false) {
   const k = norm(text);
-  if (cache[k]) return { items: cache[k].items, source: 'cache', notFood: !cache[k].items.length };
+  if (!fresh && cache[k]) return { items: cache[k].items, source: 'cache', notFood: !cache[k].items.length };
 
+  let reason = 'offline';
   if (navigator.onLine !== false) {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 25000);
@@ -40,10 +41,11 @@ export async function getEstimate(text, lang) {
           remember(k, items);
           return { items, source: 'ai', notFood: !items.length };
         }
-      }
-    } catch {} finally { clearTimeout(timer); }
+        reason = 'bad_output';
+      } else reason = (await r.json().catch(() => ({}))).error || 'upstream';
+    } catch { reason = 'unreachable'; } finally { clearTimeout(timer); }
   }
 
   const items = lookup(text, lang);
-  return items.length ? { items, source: 'table' } : { items: [], source: 'none' };
+  return items.length ? { items, source: 'table', reason } : { items: [], source: 'none', reason };
 }
