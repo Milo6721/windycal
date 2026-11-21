@@ -3,6 +3,7 @@ import { state, save, applySettings, renderTotals } from './app.js';
 import { t, num } from './i18n.js';
 import { targets, cmToFtIn, ftInToCm, kgToLb, lbToKg } from './goal.js';
 import { sfx } from './fx.js';
+import { icon, MACROS } from './icons.js';
 
 const sheet = () => document.getElementById('setsheet');
 const card = () => document.getElementById('setcard');
@@ -15,50 +16,52 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 
 function goalBox() {
   const T = targets(state.settings), own = state.settings.goalOverride > 0;
-  return `<div><div class="g-n">${num(T.kcal)}<small>kcal</small></div>
-    <div class="g-m">${t('protein')} ${T.protein} g · ${t('carbs')} ${T.carbs} g · ${t('fat')} ${T.fat} g</div>
-    <div class="g-m">${own ? `${t('own')} · ${t('calc').toLowerCase()}: ${num(T.calculated)}` : t('calc')}</div></div>
-    ${own ? `<button type="button" class="ghostbtn" data-act="reset">${t('reset')}</button>` : ''}`;
+  return `<div class="g-top"><div class="g-n">${num(T.kcal)}<small>kcal ${t('perDay')}</small></div>
+      ${own ? `<button type="button" class="ghostbtn" data-act="reset">${t('reset')}</button>` : `<span class="g-tag">${t('calc')}</span>`}</div>
+    <div class="g-macs">${MACROS.map(k => `<div class="m-${k}"><span class="ic">${icon(k, 15)}</span><b>${T[k]} g</b><span>${t(k)}</span></div>`).join('')}</div>`;
 }
 
 function render() {
   const s = state.settings, T = targets(s), b = T.body, imp = s.units === 'imperial';
   const [ft, inch] = cmToFtIn(b.height);
   const top = card().scrollTop;
+  const row = (label, control, sub = '') => `<div class="st-row"><span>${label}${sub ? `<small>${sub}</small>` : ''}</span>${control}</div>`;
   card().innerHTML = `
   <div class="c-head"><div><h2>${t('settings')}</h2><p>${t('settingsSub')}</p></div>
-    <button type="button" data-act="close" title="${t('close')} (Esc)" aria-label="${t('close')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <button type="button" data-act="close" title="${t('close')} (Esc)" aria-label="${t('close')}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
 
-  <div class="sec"><h3>${t('you')}</h3>
-    <div class="st-row"><span>${t('name')}</span><input type="text" data-in="name" value="${esc(s.name)}" placeholder="${t('namePh')}" maxlength="24" autocomplete="off"></div></div>
+  <div class="goalbox" id="goalbox">${goalBox()}</div>
+  <p class="fine">${t('formula')}</p>
 
-  <div class="sec"><h3>${t('body')}</h3>
-    <div class="st-row"><span>${t('sex')}</span>${seg('sex', b.sex, [['male', t('male')], ['female', t('female')]])}</div>
-    <div class="st-row"><span>${t('age')}</span><div class="num"><input type="number" inputmode="numeric" data-in="age" value="${b.age}" min="14" max="100">${t('years')}</div></div>
-    <div class="st-row"><span>${t('height')}</span><div class="num">${imp
-      ? `<input type="number" inputmode="numeric" data-in="ft" value="${ft}" min="3" max="8">ft <input type="number" inputmode="numeric" data-in="inch" value="${inch}" min="0" max="11">in`
-      : `<input type="number" inputmode="numeric" data-in="height" value="${b.height}" min="120" max="230">cm`}</div></div>
-    <div class="st-row"><span>${t('weight')}</span><div class="num">${imp
-      ? `<input type="number" inputmode="decimal" data-in="lb" value="${kgToLb(b.weight)}" min="70" max="600">lb`
-      : `<input type="number" inputmode="decimal" data-in="weight" value="${b.weight}" min="30" max="300" step="0.5">kg`}</div></div>
-    <div class="st-row"><span>${t('activity')}</span><select data-in="activity">${t('act').map((l, i) => `<option value="${i}" ${+b.activity === i ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-    <div class="st-row"><span>${t('goal')}</span>${seg('goal', b.goal, [['lose', t('lose')], ['maintain', t('maintain')], ['gain', t('gain')]])}</div></div>
+  <div class="sec"><h3>${t('you')}</h3><div class="grp">
+    ${row(t('name'), `<input type="text" data-in="name" value="${esc(s.name)}" placeholder="${t('namePh')}" maxlength="24" autocomplete="off">`)}
+    ${row(t('override'), `<div class="num"><input type="number" inputmode="numeric" data-in="goalOverride" value="${s.goalOverride > 0 ? s.goalOverride : ''}" placeholder="${T.calculated}" min="800" max="8000" step="10"><i>kcal</i></div>`, t('overrideSub'))}
+  </div></div>
 
-  <div class="sec"><h3>${t('daily')}</h3>
-    <div class="goalbox" id="goalbox">${goalBox()}</div>
-    <div class="st-row"><span>${t('override')}<small>${t('overrideSub')}</small></span><div class="num"><input type="number" inputmode="numeric" data-in="goalOverride" value="${s.goalOverride > 0 ? s.goalOverride : ''}" placeholder="${T.calculated}" min="800" max="8000" step="10">kcal</div></div>
-    <p class="fine">${t('formula')}</p></div>
+  <div class="sec"><h3>${t('body')}</h3><div class="grp">
+    ${row(t('sex'), seg('sex', b.sex, [['male', t('male')], ['female', t('female')]]))}
+    ${row(t('age'), `<div class="num"><input type="number" inputmode="numeric" data-in="age" value="${b.age}" min="14" max="100"><i>${t('years')}</i></div>`)}
+    ${row(t('height'), `<div class="num">${imp
+      ? `<input type="number" inputmode="numeric" data-in="ft" value="${ft}" min="3" max="8"><i>ft</i><input type="number" inputmode="numeric" data-in="inch" value="${inch}" min="0" max="11"><i>in</i>`
+      : `<input type="number" inputmode="numeric" data-in="height" value="${b.height}" min="120" max="230"><i>cm</i>`}</div>`)}
+    ${row(t('weight'), `<div class="num">${imp
+      ? `<input type="number" inputmode="decimal" data-in="lb" value="${kgToLb(b.weight)}" min="70" max="600"><i>lb</i>`
+      : `<input type="number" inputmode="decimal" data-in="weight" value="${b.weight}" min="30" max="300" step="0.5"><i>kg</i>`}</div>`)}
+    ${row(t('activity'), `<select data-in="activity">${t('act').map((l, i) => `<option value="${i}" ${+b.activity === i ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
+    ${row(t('goal'), seg('goal', b.goal, [['lose', t('lose')], ['maintain', t('maintain')], ['gain', t('gain')]]))}
+  </div></div>
 
-  <div class="sec"><h3>${t('look')}</h3>
-    <div class="st-row"><span>${t('appearance')}</span>${seg('theme', s.theme || 'auto', [['auto', t('auto')], ['light', t('light')], ['dark', t('dark')]])}</div>
-    <div class="st-row"><span>${t('sound')}</span><button type="button" class="switch ${s.sound !== false ? 'on' : ''}" data-act="sound" role="switch" aria-checked="${s.sound !== false}"><i></i></button></div>
-    <div class="st-row"><span>${t('units')}</span>${seg('units', s.units || 'metric', [['metric', t('metric')], ['imperial', t('imperial')]])}</div>
-    <div class="st-row"><span>${t('language')}</span>${seg('lang', s.lang || 'en', [['en', 'English'], ['pl', 'Polski']])}</div></div>
+  <div class="sec"><h3>${t('look')}</h3><div class="grp">
+    ${row(t('appearance'), seg('theme', s.theme || 'auto', [['auto', t('auto')], ['light', t('light')], ['dark', t('dark')]]))}
+    ${row(t('units'), seg('units', s.units || 'metric', [['metric', t('metric')], ['imperial', t('imperial')]]))}
+    ${row(t('language'), seg('lang', s.lang || 'en', [['en', 'English'], ['pl', 'Polski']]))}
+    ${row(t('sound'), `<button type="button" class="switch ${s.sound !== false ? 'on' : ''}" data-act="sound" role="switch" aria-checked="${s.sound !== false}"><i></i></button>`)}
+  </div></div>
 
   <div class="sec"><h3>${t('shortcuts')}</h3>
-    <div class="keys"><span><kbd>N</kbd> / <kbd>/</kbd> ${t('kFocus')}</span><span><kbd>Enter</kbd> ${t('kEnter')}</span><span><kbd>⌘Z</kbd> ${t('kUndo')} · <kbd>⇧⌘Z</kbd> ${t('kRedo')}</span><span><kbd>Tab</kbd> ${t('kTab')}</span><span><kbd>⌘,</kbd> ${t('kSet')}</span></div></div>
+    <div class="keys"><span><kbd>N</kbd> <kbd>/</kbd> ${t('kFocus')}</span><span><kbd>Enter</kbd> ${t('kEnter')}</span><span><kbd>⌘Z</kbd> ${t('kUndo')}</span><span><kbd>⇧⌘Z</kbd> ${t('kRedo')}</span><span><kbd>Tab</kbd> ${t('kTab')}</span><span><kbd>⌘,</kbd> ${t('kSet')}</span></div></div>
 
-  <div class="sec"><h3>${t('data')}</h3><p class="fine" style="margin:0">${t('stored')}</p></div>`;
+  <p class="fine end">${t('stored')}</p>`;
   card().scrollTop = top;
 }
 

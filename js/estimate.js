@@ -28,11 +28,11 @@ export async function getEstimate(text, lang, fresh = false) {
   let reason = 'offline';
   if (navigator.onLine !== false) {
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 25000);
+    const timer = setTimeout(() => ctl.abort(), fresh ? 55000 : 25000);
     try {
       const r = await fetch('/api/estimate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }), signal: ctl.signal,
+        body: JSON.stringify(fresh ? { text, deep: true } : { text }), signal: ctl.signal,
       });
       if (r.ok) {
         const j = await r.json();

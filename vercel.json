@@ -1,8 +1,23 @@
 {
   "functions": {
-    "api/estimate.js": { "includeFiles": "lib/spec.json", "maxDuration": 30 }
+    "api/estimate.js": {
+      "includeFiles": "lib/spec.json",
+      "maxDuration": 30
+    },
+    "api/summary.js": {
+      "includeFiles": "lib/spec.json",
+      "maxDuration": 30
+    }
   },
   "headers": [
-    { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    }
   ]
 }
