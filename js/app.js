@@ -64,6 +64,7 @@ function makeRow(e) {
       <textarea class="txt" rows="1" spellcheck="false" autocomplete="off" autocapitalize="off" enterkeyhint="done"></textarea>
       <div class="sub"><i class="dot"></i><span></span></div>
       <button class="mic" type="button">${MIC}</button>
+      <button class="x" type="button" tabindex="-1"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <button class="r" type="button" tabindex="-1">
       <span class="kcal"><b>0</b><small>kcal</small></span>
@@ -98,6 +99,8 @@ function makeRow(e) {
   });
   range.addEventListener('change', () => { row._adj = false; save(); });
   row.querySelector('.mic').addEventListener('click', () => dictate(row));
+  const x = row.querySelector('.x'); x.title = t('mDelete'); x.setAttribute('aria-label', t('mDelete'));
+  x.addEventListener('click', () => { clearTimeout(row._t); ta.value = ''; commit(row); });
   if (e) { rows.set(e.id, row); paint(row, false); }
   return row;
 }
@@ -222,6 +225,8 @@ function renderLog() {
   for (const e of list(curKey())) log.append(makeRow(e));
   log.append(makeRow(null));
   log.append(Object.assign(document.createElement('div'), { className: 'hint', id: 'hint' }));
+  const clr = Object.assign(document.createElement('button'), { className: 'clear', id: 'clear', type: 'button', textContent: t('clearDay') });
+  clr.onclick = clearDay; log.append(clr);
   placeDividers(); fitAll(); updateHint();
   rendering = false;
 }
@@ -233,8 +238,15 @@ function suggestion() {
   return (y.find(e => new Date(e.ts).getHours() < 11) || y[0])?.text || null;
 }
 function acceptSuggestion() { const d = draftRow(), s = suggestion(); if (!d || !s) return; const ta = d.querySelector('.txt'); ta.value = s; fit(ta); commit(d); focusRow(draftRow()); }
+function clearDay() {
+  if (!list(curKey()).length) return;
+  pushUndo(); state.days[curKey()] = [];
+  save(); renderLog(); renderTotals(); sfx('off');
+  toast(t('cleared'), { label: t('undo'), kbd: '⌘Z', run: undo });
+}
 function updateHint() {
   const h = $('hint'); if (!h) return;
+  if ($('clear')) $('clear').hidden = list(curKey()).length < 2;
   const d = draftRow(), typing = d && d.querySelector('.txt').value, s = suggestion();
   h.innerHTML = '';
   if (typing || list(curKey()).length) return;

@@ -26,16 +26,12 @@
 <div class="app">
   <header class="top">
     <div class="brand">
-      <svg class="logo" viewBox="0 0 28 28" aria-hidden="true">
-        <defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#CFEBDC"/><stop offset="1" stop-color="#A5D6BD"/></linearGradient></defs>
-        <rect x=".5" y=".5" width="27" height="27" rx="7" fill="url(#lg)" stroke="rgba(0,0,0,.08)"/>
-        <g fill="none" stroke="#2F6B52" stroke-width="1.7" stroke-linecap="round">
-          <path d="M6.5 10.6h9.2a2.3 2.3 0 1 0-2.3-2.3"/>
-          <path d="M6.5 14.4h13a2.5 2.5 0 1 1-2.5 2.5" opacity=".85"/>
-          <path d="M6.5 18.2h6.2a2 2 0 1 1-2 2" opacity=".6"/>
-        </g>
+      <h1 aria-label="Windy"><span style="--i:0">W</span><span style="--i:1">i</span><span style="--i:2">n</span><span style="--i:3">d</span><span style="--i:4">y</span></h1>
+      <svg class="wind" viewBox="0 0 44 22" aria-hidden="true">
+        <path pathLength="40" d="M0 6h24a3.4 3.4 0 1 0-3.4-3.4"/>
+        <path pathLength="40" d="M0 11.5h35a3.6 3.6 0 1 1-3.6 3.6"/>
+        <path pathLength="40" d="M0 17h15a2.6 2.6 0 1 1-2.6 2.6"/>
       </svg>
-      <h1>Windy</h1>
     </div>
     <nav class="days" id="days" aria-label="View">
       <span class="pill" id="pill"></span>
