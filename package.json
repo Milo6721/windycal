@@ -1,0 +1,7 @@
+{
+  "name": "windy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Windy: a calm calorie counter. Static site plus one small serverless function."
+}

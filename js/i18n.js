@@ -1,0 +1,73 @@
+// English (American) and Polish. Nothing else.
+const S = {
+  en: {
+    today: 'Today', tomorrow: 'Tomorrow', weekly: 'Weekly',
+    placeholder: 'Write a food…', placeholderTomorrow: 'Plan a food…',
+    eaten: n => `${n} kcal eaten`, planned: n => `${n} kcal planned`,
+    nothingYet: 'Nothing eaten yet', nothingPlanned: 'Nothing planned yet',
+    left: n => `${n} kcal left`, over: n => `${n} kcal over, and that's okay`,
+    protein: 'Protein', carbs: 'Carbs', fat: 'Fat', pcf: ['P', 'C', 'F'],
+    estimating: 'Estimating…', waiting: 'Waiting for the AI', unknown: 'Not sure what this is',
+    rough: 'rough estimate', morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening',
+    portion: 'Portion', removed: 'Removed', undone: 'Undone', redone: 'Redone', undo: 'Undo', redo: 'Redo',
+    nothingUndo: 'Nothing to undo', nothingRedo: 'Nothing to redo',
+    sameAs: 'Same as yesterday:', dictate: 'Dictate', noDictation: "Dictation isn't available in this browser",
+    settings: 'Settings', settingsSub: 'Make Windy yours.', close: 'Close',
+    you: 'You', name: 'Your name', namePh: 'Your first name',
+    body: 'Body', sex: 'Sex', male: 'Male', female: 'Female', age: 'Age', years: 'years',
+    height: 'Height', weight: 'Weight', activity: 'Activity',
+    act: ['Mostly sitting', 'Lightly active', 'Moderately active', 'Very active'],
+    goal: 'Goal', lose: 'Lose', maintain: 'Maintain', gain: 'Gain',
+    daily: 'Daily goal', calc: 'Calculated for you', own: 'Your own number',
+    formula: 'Mifflin–St Jeor formula, adjusted for activity and goal.',
+    override: 'Use my own number', overrideSub: 'Leave empty to use the calculated goal',
+    reset: 'Use calculated', look: 'Look and sound', appearance: 'Appearance', auto: 'Auto', light: 'Light', dark: 'Dark',
+    sound: 'Sound effects', units: 'Units', metric: 'Metric', imperial: 'Imperial', language: 'Language',
+    shortcuts: 'Shortcuts', kFocus: 'write a food', kUndo: 'undo', kRedo: 'redo', kEnter: 'next line', kSet: 'settings', kTab: 'accept suggestion',
+    data: 'Your data', stored: 'Stored on this device only.',
+    thisWeek: 'Last 7 days', avgKcal: 'kcal a day', goalWord: 'goal', noEntries: 'Nothing logged this day.',
+    daysLogged: n => n === 1 ? 'Average of 1 logged day' : `Average of ${n} logged days`, noWeek: 'Log a few days and your week will show up here.',
+    hello: n => n ? `Hi ${n}. What did you eat?` : 'Jot it down like a note. Windy does the math.',
+    helloTomorrow: 'Plan ahead. At midnight this becomes Today.',
+    offline: "You're offline. Using rough estimates for now.", back: 'Back online. Updating estimates…',
+  },
+  pl: {
+    today: 'Dzisiaj', tomorrow: 'Jutro', weekly: 'Tydzień',
+    placeholder: 'Wpisz, co zjadłeś…', placeholderTomorrow: 'Zaplanuj posiłek…',
+    eaten: n => `Zjedzone: ${n} kcal`, planned: n => `Zaplanowane: ${n} kcal`,
+    nothingYet: 'Jeszcze nic nie zjedzono', nothingPlanned: 'Jeszcze nic nie zaplanowano',
+    left: n => `Zostało ${n} kcal`, over: n => `${n} kcal ponad cel. Nic się nie stało`,
+    protein: 'Białko', carbs: 'Węgle', fat: 'Tłuszcz', pcf: ['B', 'W', 'T'],
+    estimating: 'Szacuję…', waiting: 'Czekam na AI', unknown: 'Nie wiem, co to jest',
+    rough: 'przybliżony szacunek', morning: 'Rano', afternoon: 'Po południu', evening: 'Wieczorem',
+    portion: 'Porcja', removed: 'Usunięto', undone: 'Cofnięto', redone: 'Przywrócono', undo: 'Cofnij', redo: 'Ponów',
+    nothingUndo: 'Nie ma czego cofać', nothingRedo: 'Nie ma czego ponawiać',
+    sameAs: 'To samo co wczoraj:', dictate: 'Dyktuj', noDictation: 'Dyktowanie nie działa w tej przeglądarce',
+    settings: 'Ustawienia', settingsSub: 'Dopasuj Windy do siebie.', close: 'Zamknij',
+    you: 'Ty', name: 'Twoje imię', namePh: 'Imię',
+    body: 'Ciało', sex: 'Płeć', male: 'Mężczyzna', female: 'Kobieta', age: 'Wiek', years: 'lat',
+    height: 'Wzrost', weight: 'Waga', activity: 'Aktywność',
+    act: ['Głównie siedząca', 'Lekka', 'Umiarkowana', 'Bardzo duża'],
+    goal: 'Cel', lose: 'Schudnąć', maintain: 'Utrzymać', gain: 'Przytyć',
+    daily: 'Dzienny cel', calc: 'Wyliczone dla Ciebie', own: 'Twoja własna liczba',
+    formula: 'Wzór Mifflina–St Jeora z poprawką na aktywność i cel.',
+    override: 'Własna liczba', overrideSub: 'Zostaw puste, aby użyć wyliczonego celu',
+    reset: 'Użyj wyliczonego', look: 'Wygląd i dźwięk', appearance: 'Wygląd', auto: 'Auto', light: 'Jasny', dark: 'Ciemny',
+    sound: 'Dźwięki', units: 'Jednostki', metric: 'Metryczne', imperial: 'Imperialne', language: 'Język',
+    shortcuts: 'Skróty', kFocus: 'wpisz posiłek', kUndo: 'cofnij', kRedo: 'ponów', kEnter: 'następna linia', kSet: 'ustawienia', kTab: 'przyjmij podpowiedź',
+    data: 'Twoje dane', stored: 'Zapisane tylko na tym urządzeniu.',
+    thisWeek: 'Ostatnie 7 dni', avgKcal: 'kcal dziennie', goalWord: 'cel', noEntries: 'Tego dnia nic nie zapisano.',
+    daysLogged: n => `Średnia z ${n} ${n === 1 ? 'zapisanego dnia' : 'zapisanych dni'}`, noWeek: 'Zapisz kilka dni, a zobaczysz tu swój tydzień.',
+    hello: n => n ? `Cześć ${n}. Co dziś zjadłeś?` : 'Zapisz jak notatkę. Windy policzy resztę.',
+    helloTomorrow: 'Zaplanuj z wyprzedzeniem. O północy to będzie Dzisiaj.',
+    offline: 'Jesteś offline. Na razie przybliżone szacunki.', back: 'Znów online. Aktualizuję szacunki…',
+  },
+};
+
+let lang = 'en';
+export const setLang = l => { lang = l === 'pl' ? 'pl' : 'en'; document.documentElement.lang = lang; };
+export const getLang = () => lang;
+export const locale = () => (lang === 'pl' ? 'pl-PL' : 'en-US');
+export const t = (k, ...a) => { const v = S[lang][k] ?? S.en[k] ?? k; return typeof v === 'function' ? v(...a) : v; };
+export const num = n => Math.round(n).toLocaleString(locale());
+export const longDate = d => { const s = d.toLocaleDateString(locale(), { weekday: 'long', month: 'long', day: 'numeric' }); return s[0].toUpperCase() + s.slice(1); };

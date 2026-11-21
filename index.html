@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Windy</title>
+<meta name="description" content="A calm calorie counter. Write what you ate, in plain words.">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Windy">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<script>
+  // Set the theme before first paint so there is no flash.
+  (function () {
+    var m = 'auto';
+    try { m = (JSON.parse(localStorage.getItem('windy.v1') || '{}').settings || {}).theme || 'auto'; } catch (e) {}
+    var dark = m === 'dark' || (m === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.dataset.mode = dark ? 'dark' : 'light';
+  })();
+</script>
+<link rel="stylesheet" href="css/windy.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 28 28" aria-hidden="true">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#CFEBDC"/><stop offset="1" stop-color="#A5D6BD"/></linearGradient></defs>
+        <rect x=".5" y=".5" width="27" height="27" rx="7" fill="url(#lg)" stroke="rgba(0,0,0,.08)"/>
+        <g fill="none" stroke="#2F6B52" stroke-width="1.7" stroke-linecap="round">
+          <path d="M6.5 10.6h9.2a2.3 2.3 0 1 0-2.3-2.3"/>
+          <path d="M6.5 14.4h13a2.5 2.5 0 1 1-2.5 2.5" opacity=".85"/>
+          <path d="M6.5 18.2h6.2a2 2 0 1 1-2 2" opacity=".6"/>
+        </g>
+      </svg>
+      <h1>Windy</h1>
+    </div>
+    <nav class="days" id="days" aria-label="View">
+      <span class="pill" id="pill"></span>
+      <button data-view="today" class="on"></button>
+      <button data-view="tomorrow"></button>
+      <button data-view="weekly"></button>
+    </nav>
+    <div class="hbtns">
+      <button class="icon-btn" id="setbtn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+    </div>
+  </header>
+
+  <main id="scroll">
+    <div class="head">
+      <h2 id="title"></h2>
+      <p id="dateline"></p>
+      <p id="eaten"></p>
+    </div>
+    <section id="log" class="log" aria-label="Food log"></section>
+    <section id="weekly" class="weekly" hidden></section>
+  </main>
+
+  <footer class="bar" id="bar">
+    <div class="b-left">
+      <svg class="ring" viewBox="0 0 48 48" aria-hidden="true">
+        <circle class="ring-bg" cx="24" cy="24" r="20"/>
+        <circle class="ring-fg" id="ring" cx="24" cy="24" r="20" stroke-dasharray="125.66" stroke-dashoffset="125.66"/>
+      </svg>
+      <div class="b-kcal">
+        <div class="big"><b id="bEaten">0</b><span> / <i id="bGoal">0</i></span></div>
+        <div class="small" id="bLeft"></div>
+      </div>
+    </div>
+    <div class="b-right">
+      <div class="mac" data-m="protein"><b><i class="n">0</i> g</b><span class="lbl"></span><em><u></u></em></div>
+      <div class="mac" data-m="carbs"><b><i class="n">0</i> g</b><span class="lbl"></span><em><u></u></em></div>
+      <div class="mac" data-m="fat"><b><i class="n">0</i> g</b><span class="lbl"></span><em><u></u></em></div>
+    </div>
+  </footer>
+</div>
+
+<div id="setsheet" class="sheet"><div class="card" id="setcard" role="dialog" aria-modal="true"></div></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
