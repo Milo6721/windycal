@@ -5,7 +5,7 @@ export class Spring {
   constructor(onUpdate, { stiffness = 120, damping = 14 } = {}) {
     this.v = 0; this.x = 0; this.to = 0; this.k = stiffness; this.c = damping; this.onUpdate = onUpdate; this.raf = 0;
   }
-  jump(x) { this.x = this.to = x; this.v = 0; this.onUpdate(x); }
+  jump(x) { cancelAnimationFrame(this.raf); this.raf = 0; this.x = this.to = x; this.v = 0; this.onUpdate(x); }
   set(to) {
     this.to = to;
     if (this.raf) return;

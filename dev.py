@@ -95,7 +95,7 @@ class Handler(SimpleHTTPRequestHandler):
                     headers={"content-type": "application/json", "x-goog-api-key": key},
                 )
                 try:
-                    with urllib.request.urlopen(req, timeout=15) as r:
+                    with urllib.request.urlopen(req, timeout=9) as r:
                         msg = json.load(r)
                 except urllib.error.HTTPError as e:
                     raw = e.read().decode(errors="replace")
@@ -157,7 +157,7 @@ class Handler(SimpleHTTPRequestHandler):
                     "foods": [str(f)[:120] for f in (d.get("foods") or [])[:30]],
                 } for d in days],
             }
-            text = self.gemini(key, spec, spec["summary_system"], json.dumps(payload, ensure_ascii=False), {"temperature": 0.6, "thinkingConfig": {"thinkingBudget": 1024}}, smart=True)
+            text = self.gemini(key, spec, spec["summary_system"], json.dumps(payload, ensure_ascii=False), {"temperature": 0.6, "thinkingConfig": {"thinkingBudget": 0}})
             if text is None:
                 return
             if not text.strip():
@@ -174,8 +174,8 @@ class Handler(SimpleHTTPRequestHandler):
             "responseMimeType": "application/json",
             "responseSchema": spec["schema"],
             "temperature": 0.2,
-            "thinkingConfig": {"thinkingBudget": 2048 if deep else 0},
-        }, smart=deep)
+            "thinkingConfig": {"thinkingBudget": 1024 if deep else 0},
+        })
         if out is None:
             return
         if not out:

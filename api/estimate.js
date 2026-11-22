@@ -27,11 +27,11 @@ async function estimate(key, body, res) {
   if (!text) return res.status(400).json({ error: "empty" });
   if (text.length > 240) return res.status(400).json({ error: "too_long" });
   const deep = body.deep === true;
-  const out = await gemini(key, deep ? spec.models_smart : spec.models_fast, spec.system + (deep ? spec.deep_extra : ""), text, {
+  const out = await gemini(key, spec.models_fast, spec.system + (deep ? spec.deep_extra : ""), text, {
     responseMimeType: "application/json",
     responseSchema: spec.schema,
     temperature: 0.2,
-    thinkingConfig: { thinkingBudget: deep ? 2048 : 0 },
+    thinkingConfig: { thinkingBudget: deep ? 1024 : 0 },
   });
   if (out.error) return res.status(out.status).json({ error: out.error, detail: out.detail });
   if (!out.text) return res.status(200).json({ is_food: false, items: [] });
@@ -55,9 +55,9 @@ async function summary(key, s, res) {
       foods: (Array.isArray(d.foods) ? d.foods : []).slice(0, 30).map((f) => String(f).slice(0, 120)),
     })),
   };
-  const out = await gemini(key, spec.models_smart, spec.summary_system, JSON.stringify(payload), {
+  const out = await gemini(key, spec.models_fast, spec.summary_system, JSON.stringify(payload), {
     temperature: 0.6,
-    thinkingConfig: { thinkingBudget: 1024 },
+    thinkingConfig: { thinkingBudget: 0 },
   });
   if (out.error) return res.status(out.status).json({ error: out.error, detail: out.detail });
   if (!out.text.trim()) return res.status(502).json({ error: "bad_output" });
@@ -108,15 +108,17 @@ function simpler(config, detail, step) {
 const lower = (n) => Array.isArray(n) ? n.map(lower) : n && typeof n === "object"
   ? Object.fromEntries(Object.entries(n).map(([k, v]) => [k, k === "type" && typeof v === "string" ? v.toLowerCase() : lower(v)])) : n;
 
+const resting = new Map(); // model → time it may be asked again
 async function gemini(key, list, system, userText, generationConfig) {
   const smart = list === spec.models_smart;
   const models = await pickModels(key, smart);
   const errors = [];
   let limited = null;
   const t0 = Date.now();
-  for (const model of models) {
+  for (const model of models.filter((m) => !(resting.get(m) > Date.now())).concat(models.filter((m) => resting.get(m) > Date.now()))) {
+    if (Date.now() - t0 > 16000) break;
     let config = model.startsWith("gemini-2.0") ? { ...generationConfig, thinkingConfig: undefined } : generationConfig;
-    for (let step = 0; step < 3 && Date.now() - t0 < 22000; step++) {
+    for (let step = 0; step < 3 && Date.now() - t0 < 16000; step++) {
       let r;
       try {
         r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -127,7 +129,7 @@ async function gemini(key, list, system, userText, generationConfig) {
             contents: [{ role: "user", parts: [{ text: userText }] }],
             generationConfig: config,
           }),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(Math.max(3000, Math.min(9000, 17000 - (Date.now() - t0)))),
         });
       } catch { errors.push(`${model}: no answer`); break; }
       if (r.ok) {
@@ -143,6 +145,7 @@ async function gemini(key, list, system, userText, generationConfig) {
       console.error("Gemini", model, r.status, detail);
       if (r.status === 401 || r.status === 403 || (r.status === 400 && /api key/i.test(detail))) return { error: "bad_key", status: 503, detail };
       if (r.status === 400) { const next = simpler(config, detail, step); if (next) { config = next; continue; } }
+      if (r.status === 429) resting.set(model, Date.now() + 10 * 60e3);
       if (r.status === 429) limited = { error: "rate_limited", status: 429, detail: `${model}: ${detail}` };
       errors.push(`${model}: ${r.status} ${detail}`);
       break; // try the next model

@@ -123,22 +123,12 @@ function aiPayload(scope) {
       foods: x.entries.filter(e => e.text).map(e => `${e.text} (${Math.round(totalsOf([e]).kcal)} kcal)`) })),
   };
 }
-function aiSide() {
-  const T = targets(state.settings), week = lastDays(7);
-  const scopeDays = aiScope === 'day' ? lastDays(1) : week;
-  const tot = scopeDays.reduce((s, x) => { for (const k in s) s[k] += x.tot[k]; return s; }, { kcal: 0, protein: 0, carbs: 0, fat: 0 });
-  const kc = MACROS.map((k, i) => tot[k] * [4, 4, 9][i]), sum = kc.reduce((a, b) => a + b, 0) || 1;
-  return `${bars(week, T.kcal, false)}
-      <div class="ai-split">${MACROS.map((k, i) => `<i class="bg-${k}" style="flex-grow:${Math.max(kc[i], 0.0001)}"></i>`).join('')}</div>
-`;
-}
 function renderAI() {
   const el = panels.ai.querySelector('.pan-c');
   el.innerHTML = `
     <div class="st-l"><div class="st-title"><span class="ai-spark">${SPARK}</span>${t('aiTitle')}</div>
       <div class="bseg ai-seg"><button type="button" data-s="day" class="${aiScope === 'day' ? 'on' : ''}">${t('sDay')}</button><button type="button" data-s="week" class="${aiScope === 'week' ? 'on' : ''}">${t('sWeek')}</button></div></div>
-    <div class="s-ai-out"></div>
-    <div class="ai-side">${aiSide()}</div>`;
+    <div class="s-ai-out"></div>`;
   el.querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => { if (aiScope !== b.dataset.s) { aiScope = b.dataset.s; sfx('pop'); renderAI(); askAI(); } }));
   const cached = aiCache[aiScope];
   if (cached && cached.key === JSON.stringify(aiPayload(aiScope))) showText(cached.text, false);
@@ -159,36 +149,33 @@ async function askAI(force = false) {
   const payload = aiPayload(scope), key = JSON.stringify(payload);
   if (!payload.days.length) { out.innerHTML = `<p class="s-ai-hint">${t('aiEmpty')}</p>`; return; }
   if (!force && aiCache[scope]?.key === key) return showText(aiCache[scope].text, false);
-  out.innerHTML = `<div class="ai-wave"></div><p class="s-ai-think">${t('aiThinking')}</p>`; out.scrollTop = 0;
-  let text = '', why = 'unreachable', detail = '';
+  // Something to read right away: Windy's own read of the numbers, with a soft green
+  // shimmer while the AI writes its version. The AI text replaces it when it arrives.
+  const own = localRead(scope, payload);
+  out.innerHTML = '';
+  const p = Object.assign(document.createElement('p'), { className: 'ai-text own', textContent: own });
+  const note = Object.assign(document.createElement('small'), { className: 'ai-detail ai-reading' });
+  note.innerHTML = `<i class="ai-dots"></i>${t('aiThinking')}`;
+  p.append(note); out.append(p); out.scrollTop = 0;
+  let text = '', why = 'unreachable';
   try {
-    const r = await fetch('/api/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: payload }) });
+    const r = await fetch('/api/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: payload }), signal: AbortSignal.timeout(22000) });
     const j = await r.json().catch(() => ({}));
     if (r.ok && j.text) text = j.text;
-    else { why = r.status === 404 ? 'not_deployed' : j.error || 'upstream'; detail = j.detail || ''; }
+    else why = r.status === 404 ? 'not_deployed' : j.error || 'upstream';
   } catch {}
-  if (run !== aiRun || !panels.ai.isConnected) return;
-  if (!text) {
-    const own = localRead(scope, payload);
-    if (own) {
-      out.innerHTML = '';
-      const p = Object.assign(document.createElement('p'), { className: 'ai-text', textContent: own });
-      const note = Object.assign(document.createElement('small'), { className: 'ai-detail', textContent: (why === 'rate_limited' ? t('aiLimit') : t('aiOwn')) + ' ' });
-      const again = Object.assign(document.createElement('button'), { type: 'button', className: 'ai-again', textContent: t('tryAgain') });
-      again.onclick = () => askAI(true); note.append(again); p.append(note); out.append(p);
-      return;
-    }
-    const msg = why === 'not_deployed' ? t('aiDeploy') : ['no_key', 'bad_key', 'rate_limited'].includes(why) ? t('why_' + why) : t('aiFail');
-    out.innerHTML = '';
-    const p = Object.assign(document.createElement('p'), { className: 's-ai-hint', textContent: msg + ' ' });
-    if (detail) p.append(Object.assign(document.createElement('small'), { className: 'ai-detail', textContent: detail }));
+  if (run !== aiRun || !out.isConnected) return;
+  if (!text) { // keep Windy's read, and say quietly why there is no AI version
+    note.className = 'ai-detail';
+    note.textContent = (why === 'rate_limited' ? t('aiLimit') : why === 'not_deployed' ? t('aiDeploy') : t('aiOwn')) + ' ';
     const again = Object.assign(document.createElement('button'), { type: 'button', className: 'ai-again', textContent: t('tryAgain') });
-    again.onclick = () => askAI(true); p.append(again); out.append(p);
+    again.onclick = () => askAI(true); note.append(again);
     return;
   }
   aiCache[scope] = { key, text };
   try { localStorage.setItem(AI_KEY, JSON.stringify(aiCache)); } catch {}
-  sfx('land'); showText(text, true);
+  p.classList.add('leaving');
+  setTimeout(() => { if (run === aiRun) { sfx('land'); showText(text, true); } }, 220);
 }
 
 // A short written read made from the numbers alone, for when Gemini is resting.
@@ -286,7 +273,9 @@ function place(kind) {
   else { const c = el.querySelector('.pan-c'); c.style.width = geo.width + 'px'; c.style.height = geo.height + 'px'; }
 }
 function resetBar(kind) {
-  bar.classList.remove('k-' + kind, 'sided');
+  bar.classList.remove('k-' + kind);
+  if (openKind && openKind !== kind) return; // another panel is open now: leave the bar to it
+  bar.classList.remove('sided');
   bar.style.removeProperty('--slide'); bar.style.removeProperty('--fade'); bar.style.removeProperty('--blur');
   if (openKind === kind) { openKind = null; bar.classList.remove('lifted'); bar.style.setProperty('--open', 0); }
 }
@@ -312,7 +301,7 @@ export function closeSummary() { if (openKind) settle(openKind, 0); }
 export function openSummary(kind = 'up') { if (openKind !== kind) begin(kind); settle(kind, 1); }
 export function refreshSummary() {
   if (!openKind || progress < 0.99) return;
-  if (openKind === 'up') goPage(page, false); else if (openKind === 'trend') renderTrend(false); else panels.ai.querySelector('.ai-side').innerHTML = aiSide();
+  if (openKind === 'up') goPage(page, false); else if (openKind === 'trend') renderTrend(false); /* the AI read is refreshed only when you open it again or switch Day/Week */
 }
 
 function makePanel(kind) {
@@ -350,9 +339,10 @@ function onMove(ev) {
     if (Math.hypot(dx, dy) < 7) return;
     drag.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
     try { drag.node.setPointerCapture(drag.id); } catch {}
+    if (openKind && springs[openKind].to === 0) hideNow(openKind); // it was already closing: start fresh
     if (openKind === 'up' && drag.src === 'panel' && drag.axis === 'x') drag.mode = 'page';
     else if (openKind && ((openKind === 'up' && drag.axis === 'y') || (openKind !== 'up' && drag.axis === 'x'))) { drag.mode = 'adjust'; drag.kind = openKind; drag.p0 = springs[openKind].x; }
-    else if (!openKind && drag.src === 'bar') drag.mode = drag.axis === 'y' ? 'up' : 'side';
+    else if (!openKind) drag.mode = drag.axis === 'y' ? 'up' : 'side';
     else drag.mode = 'none';
     if (drag.mode !== 'none' && drag.mode !== 'page') document.body.classList.add('pulling');
   }
