@@ -9,7 +9,8 @@ let el, video, stream, detector, raf, busy = false, onFound = null;
 function build() {
   el = document.createElement('div'); el.className = 'scanner'; el.id = 'scanner';
   el.innerHTML = `<div class="sc-card" role="dialog" aria-modal="true">
-    <div class="sc-head"><b>${t('scanTitle')}</b><button type="button" class="sc-x" aria-label="${t('close')}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="sc-head"><b>${t('scanTitle')}<em class="wip-pill"><i>!</i>${t('wipShort')}</em></b><button type="button" class="sc-x" aria-label="${t('close')}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <p class="sc-wip">${t('wipNote')}</p>
     <div class="sc-view"><video playsinline muted></video><i class="sc-frame"></i><i class="sc-line"></i><p class="sc-msg"></p></div>
     <form class="sc-type"><input inputmode="numeric" pattern="[0-9]*" maxlength="14" placeholder="${t('scanType')}" autocomplete="off"><button type="submit">${t('scanFind')}</button></form>
     <p class="sc-res" hidden></p>

@@ -103,7 +103,8 @@ async function summary(key, s, res) {
   const g = s.goal || {};
   const payload = {
     scope: s.scope === "week" ? "week" : "day",
-    style: s.style === "coach" ? "coach" : s.style === "note" ? "note" : "summary",
+    style: s.style === "coach" ? "coach" : s.style === "note" ? "note" : s.style === "today" ? "today" : "summary",
+    now: String(s.now || "").slice(0, 40),
     language: s.lang === "pl" ? "Polish" : "American English",
     goal: { kcal: n(g.kcal), protein: n(g.protein), carbs: n(g.carbs), fat: n(g.fat) },
     days: days.map((d) => ({
@@ -112,7 +113,7 @@ async function summary(key, s, res) {
       foods: (Array.isArray(d.foods) ? d.foods : []).slice(0, 30).map((f) => String(f).slice(0, 120)),
     })),
   };
-  const system = s.style === 'coach' ? spec.coach_system : s.style === 'note' ? spec.note_system : spec.summary_system;
+  const system = s.style === 'coach' ? spec.coach_system : s.style === 'note' ? spec.note_system : s.style === 'today' ? spec.today_system : spec.summary_system;
   const out = await gemini(key, spec.models_fast, system, JSON.stringify(payload), {
     temperature: 0.6,
     thinkingConfig: { thinkingBudget: 0 },

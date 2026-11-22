@@ -230,7 +230,8 @@ class Handler(SimpleHTTPRequestHandler):
                     "foods": [str(f)[:120] for f in (d.get("foods") or [])[:30]],
                 } for d in days],
             }
-            system = spec["coach_system"] if body.get("style") == "coach" else spec["note_system"] if body.get("style") == "note" else spec["summary_system"]
+            system = spec["coach_system"] if body.get("style") == "coach" else spec["note_system"] if body.get("style") == "note" else spec["today_system"] if body.get("style") == "today" else spec["summary_system"]
+            payload["now"] = str(body.get("now", ""))[:40]
             text = self.gemini(key, spec, system, json.dumps(payload, ensure_ascii=False), {"temperature": 0.6, "thinkingConfig": {"thinkingBudget": 0}})
             if text is None:
                 return

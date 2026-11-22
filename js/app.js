@@ -12,6 +12,7 @@ import { initWater, paintWater } from './water.js';
 import { initTip, renderTip } from './tip.js';
 import { initSync } from './sync.js';
 import { openScanner } from './barcode.js';
+import { initCoach, toggleCoach, closeCoach, coachOpen } from './coach.js';
 
 const $ = id => document.getElementById(id);
 const KEY = 'windy.v1';
@@ -27,6 +28,8 @@ export const state = { days: {}, settings: {} };
 try { Object.assign(state, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch {}
 state.days = state.days || {}; state.settings = state.settings || {};
 state.dayMod = state.dayMod || {}; state.water = state.water || {};
+// Photos are no longer kept (they are only sent to the AI once); remove any left from older versions.
+for (const k in state.days) for (const e of state.days[k] || []) { delete e.photo; delete e.photoHQ; }
 // Each save notes which days (and whether the settings) actually changed, and when.
 // Sync uses these times to keep the newest version of each day on every device.
 const seen = {};
@@ -352,9 +355,9 @@ function shrink(file, max, quality) {
 }
 async function addPhoto(file) {
   let big, thumb;
-  try { [big, thumb] = await Promise.all([shrink(file, 1024, 0.8), shrink(file, 96, 0.7)]); } catch { return toast(t('photoFail')); }
+  try { big = await shrink(file, 1024, 0.8); } catch { return toast(t('photoFail')); }
   pushUndo();
-  const e = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text: t('photoMeal'), photo: thumb, fromPhoto: true, ts: Date.now(), status: 'pending', items: [], mult: 1 };
+  const e = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text: t('photoMeal'), fromPhoto: true, ts: Date.now(), status: 'pending', items: [], mult: 1 };
   list(curKey()).push(e);
   save(); renderLog(); refreshAll(); sfx('pop');
   estimatePhoto(e, big.split(',')[1]);
@@ -387,7 +390,7 @@ async function estimatePhoto(e, data) {
 const cm = document.createElement('div'); cm.className = 'cam-menu'; cm.setAttribute('role', 'menu'); document.body.append(cm);
 function camMenu(btn) {
   if (cm.classList.contains('open')) return cm.classList.remove('open');
-  cm.innerHTML = `<button type="button" role="menuitem" data-c="photo">${CAM}<span>${t('takePhoto')}</span></button><button type="button" role="menuitem" data-c="scan">${SCAN}<span>${t('scanTitle')}</span></button>`;
+  cm.innerHTML = `<button type="button" role="menuitem" data-c="photo">${CAM}<span>${t('takePhoto')}</span></button><button type="button" role="menuitem" data-c="scan">${SCAN}<span>${t('scanTitle')}</span><em class="wip" title="${t('wipTitle')}">!</em></button>`;
   const r = btn.getBoundingClientRect();
   cm.style.right = Math.max(8, innerWidth - r.right) + 'px'; cm.style.bottom = (innerHeight - r.top + 8) + 'px';
   cm.classList.add('open'); cm.querySelector('button').focus();
@@ -492,7 +495,7 @@ function setView(v, swap = true) {
   movePill();
   $('log').hidden = v === 'weekly'; $('weekly').hidden = v !== 'weekly';
   $('bar').classList.toggle('away', v === 'weekly');
-  closeDetail(); if (v === 'weekly') closeSummary();
+  closeDetail(); if (v === 'weekly') { closeSummary(); closeCoach(); }
   renderHead(swap);
   if (v === 'weekly') renderWeekly($('weekly'));
   else { renderLog(); renderTotals(); }
@@ -742,15 +745,81 @@ dim.addEventListener('click', closeDetail);
   card.addEventListener('pointerup', end); card.addEventListener('pointercancel', end);
 })();
 
+// ---------- Windy's own menu: right-click a food (or long-press on a phone) ----------
+const ICO = {
+  details: '<path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="16" r="3"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  fix: '<path d="M10 3c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z"/>',
+  dup: '<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  move: '<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>',
+  copy: '<path d="M9 5h6a2 2 0 0 1 2 2v1M9 5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-7"/><path d="M12 13h6M12 16h4"/>',
+  del: '<path d="M4 7h16"/><path d="M9.5 7V5h5v2"/><path d="M6.5 7l1 12a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2l1-12"/>',
+};
+const ctx = document.createElement('div'); ctx.className = 'ctx'; ctx.setAttribute('role', 'menu'); document.body.append(ctx);
+let ctxRow = null;
+const closeCtx = () => { ctx.classList.remove('open'); ctxRow?.classList.remove('ctx-on'); ctxRow = null; };
+function openCtx(row, x, y) {
+  const e = row._e && locate(row._e.id); if (!e) return;
+  closeCtx(); cm.classList.remove('open');
+  ctxRow = row; row.classList.add('ctx-on');
+  const onToday = (state.days[dayKey(0)] || []).includes(e);
+  const item = (a, label, cls = '') => `<button type="button" role="menuitem" class="${cls}" data-a="${a}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICO[a]}</svg><span>${label}</span></button>`;
+  ctx.innerHTML = item('details', t('ctxDetails')) + item('edit', t('ctxEdit')) + item('fix', t('ctxFix')) + '<i></i>'
+    + item('dup', t('ctxDup')) + item('move', t(onToday ? 'mToTomorrow' : 'mToToday')) + item('copy', t('ctxCopy')) + '<i></i>' + item('del', t('mDelete'), 'danger');
+  ctx.style.left = '0px'; ctx.style.top = '0px'; ctx.classList.add('measure');
+  const w = ctx.offsetWidth, h = ctx.offsetHeight; ctx.classList.remove('measure');
+  const left = Math.max(8, Math.min(x, innerWidth - w - 8)), top = Math.max(8, Math.min(y, innerHeight - h - 8));
+  ctx.style.left = left + 'px'; ctx.style.top = top + 'px'; ctx.style.transformOrigin = `${x - left}px ${y - top}px`;
+  void ctx.offsetWidth; ctx.classList.add('open');
+  ctx.querySelector('button').focus({ preventScroll: true });
+  navigator.vibrate?.(8);
+}
+function ctxAction(a) {
+  const row = ctxRow, e = row && row._e && locate(row._e.id); closeCtx(); if (!e) return;
+  if (a === 'details') openDetail(row);
+  else if (a === 'edit') focusRow(row);
+  else if (a === 'fix') { openDetail(row); setTimeout(() => card.querySelector('.dv-fix input')?.focus(), 420); }
+  else if (a === 'del') { row.querySelector('.txt').value = ''; commit(row); }
+  else if (a === 'copy') { const k = Math.round(totalsOf([e]).kcal); navigator.clipboard?.writeText(k ? `${e.text} · ${k} kcal` : e.text).then(() => toast(t('copiedLine')), () => {}); }
+  else if (a === 'dup') {
+    pushUndo();
+    const k = Object.keys(state.days).find(x => state.days[x].includes(e)), arr = state.days[k];
+    const copy = JSON.parse(JSON.stringify(e)); copy.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6); copy.ts = Date.now(); delete copy.planned;
+    arr.splice(arr.indexOf(e) + 1, 0, copy);
+    save(); renderLog(); refreshAll(); sfx('land');
+    const r = rows.get(copy.id); if (r) { r.classList.add('in', 'arrived'); setTimeout(() => r.classList.remove('in', 'arrived'), 1400); }
+    toast(t('duplicated'), { label: t('undo'), kbd: '⌘Z', run: undo });
+  } else if (a === 'move') {
+    const onToday = (state.days[dayKey(0)] || []).includes(e);
+    pushUndo();
+    const from = Object.keys(state.days).find(k => state.days[k].includes(e)), to = dayKey(onToday ? 1 : 0);
+    state.days[from] = state.days[from].filter(z => z !== e); list(to).push(e);
+    save(); renderLog(); refreshAll(); sfx('pop');
+    toast(t(onToday ? 'movedTomorrow' : 'movedToday'), { label: t('undo'), kbd: '⌘Z', run: undo });
+  }
+}
+ctx.addEventListener('click', ev => { const b = ev.target.closest('button'); if (b) ctxAction(b.dataset.a); });
+ctx.addEventListener('keydown', ev => {
+  const items = [...ctx.querySelectorAll('button')], i = items.indexOf(document.activeElement);
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); items[(i + (ev.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus(); }
+  else if (ev.key === 'Home' || ev.key === 'End') { ev.preventDefault(); items[ev.key === 'Home' ? 0 : items.length - 1].focus(); }
+  else if (ev.key === 'Escape' || ev.key === 'Tab') { ev.preventDefault(); const r = ctxRow; closeCtx(); r?.querySelector('.r')?.focus(); }
+});
+document.addEventListener('pointerdown', ev => { if (ctx.classList.contains('open') && !ev.target.closest('.ctx')) closeCtx(); }, true);
+addEventListener('blur', closeCtx); addEventListener('resize', closeCtx);
+$('scroll').addEventListener('scroll', closeCtx, { passive: true });
+
+// only food lines get Windy's menu; the line you are typing in keeps the normal one
 $('log').addEventListener('contextmenu', ev => {
-  const row = ev.target.closest('.row:not(.draft):not(.out)'); if (!row || !row._e || ev.target.closest('textarea:focus')) return;
-  ev.preventDefault(); openDetail(row);
+  const row = ev.target.closest('.row:not(.draft):not(.out)'); if (!row || !row._e) return;
+  if (ev.target.closest('textarea') && document.activeElement === ev.target) return;
+  ev.preventDefault(); openCtx(row, ev.clientX, ev.clientY);
 });
 let pressT;
 $('log').addEventListener('touchstart', ev => { // long-press on a phone
   const row = ev.target.closest('.row:not(.draft):not(.out)'); if (!row || !row._e) return;
-  clearTimeout(pressT);
-  pressT = setTimeout(() => openDetail(row), 520);
+  const p = ev.touches[0]; clearTimeout(pressT);
+  pressT = setTimeout(() => { document.activeElement?.blur?.(); openCtx(row, p.clientX, p.clientY); }, 500);
 }, { passive: true });
 for (const n of ['touchmove', 'touchend', 'touchcancel']) $('log').addEventListener(n, () => clearTimeout(pressT), { passive: true });
 document.addEventListener('pointerdown', ev => { if (cur && innerWidth > 700 && !ev.target.closest('#detail, .row.picked .r, .photo-view, #toast')) closeDetail(); });
@@ -804,6 +873,9 @@ document.addEventListener('keydown', ev => {
     }
     ev.preventDefault(); ev.shiftKey ? redo() : undo();
   } else if (mod && ev.key === ',') { ev.preventDefault(); openSettings(); }
+  else if (ev.key === 'Escape' && ctx.classList.contains('open')) closeCtx();
+  else if (ev.key === 'Escape' && coachOpen()) closeCoach();
+  else if (!typing && !mod && !ev.altKey && !settingsOpen() && (ev.key === 'c' || ev.key === 'C') && view !== 'weekly') { ev.preventDefault(); toggleCoach(); }
   else if (ev.key === 'Escape' && cur) closeDetail();
   else if (ev.key === 'Escape' && settingsOpen()) closeSettings();
   else if (!typing && !mod && !ev.altKey && !settingsOpen() && (ev.key === 'n' || ev.key === 'N' || ev.key === '/')) {
@@ -832,6 +904,8 @@ initSettings();
 initSummary();
 initWater();
 initTip(() => view);
+initCoach(() => view !== 'weekly');
+$('coachbtn').addEventListener('click', toggleCoach);
 // another device changed something: show it
 addEventListener('windy:synced', ev => { if (ev.detail?.settings) applySettings(); else weaveRemote(); });
 addEventListener('windy:joined', () => toast(t('syncJoined')));

@@ -1093,3 +1093,55 @@ body.swipe-lock, body.swipe-lock * { user-select: none !important; -webkit-user-
 }
 @media (prefers-reduced-motion: reduce) { .dv, .dv-mac s { transition: none; } .dv.thinking * { animation: none !important; } }
 @media (max-width: 700px) { .log .x { display: none !important; } }
+
+/* barcode: still being built */
+.wip { margin-left: auto; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #E9A23B; color: #fff; font: 800 11px/1 var(--ui); font-style: normal; }
+.wip-pill { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; padding: 3px 8px 3px 4px; border-radius: 99px; background: rgba(233, 162, 59, .16); color: #B7771C; font: 600 11.5px/1 var(--ui); font-style: normal; vertical-align: middle; }
+.wip-pill i { display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: #E9A23B; color: #fff; font: 800 10px/1 var(--ui); font-style: normal; }
+.sc-wip { margin: -4px 0 10px; font-size: 12.5px; line-height: 1.4; color: #B7771C; }
+:root[data-mode="dark"] .wip-pill, :root[data-mode="dark"] .sc-wip { color: #E9B866; }
+
+/* ---------- Windy's own right-click menu ---------- */
+.ctx { position: fixed; z-index: 90; min-width: 212px; padding: 6px; border-radius: 16px; background: color-mix(in srgb, var(--card) 92%, transparent);
+  backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  box-shadow: 0 14px 40px -10px rgba(20, 16, 8, .3), 0 0 0 .5px rgba(0, 0, 0, .08);
+  opacity: 0; transform: scale(.94); pointer-events: none; transition: opacity .14s, transform .28s cubic-bezier(.2, 1, .3, 1); }
+:root[data-mode="dark"] .ctx { background: rgba(42, 40, 38, .94); box-shadow: 0 14px 40px -10px rgba(0, 0, 0, .7), 0 0 0 .5px rgba(255, 255, 255, .08); }
+.ctx.open { opacity: 1; transform: none; pointer-events: auto; }
+.ctx.measure { opacity: 0; transform: none; visibility: hidden; }
+.ctx button { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; border-radius: 10px; padding: 9px 11px; font: 500 13.5px/1.2 var(--ui); color: var(--ink); cursor: pointer; text-align: left; outline: 0; }
+.ctx button svg { color: var(--soft); flex: none; }
+.ctx button:hover, .ctx button:focus-visible { background: rgba(127, 127, 127, .12); }
+.ctx button:hover svg, .ctx button:focus-visible svg { color: var(--green); }
+.ctx button.danger, .ctx button.danger svg { color: #D5584F; }
+.ctx button.danger:hover, .ctx button.danger:focus-visible { background: rgba(213, 88, 79, .1); }
+.ctx i { display: block; height: 1px; margin: 5px 8px; background: rgba(127, 127, 127, .15); }
+.row.ctx-on { background: rgba(127, 127, 127, .06); border-radius: 12px; box-shadow: 0 0 0 6px rgba(127, 127, 127, .06); }
+@media (hover: none) { .ctx button { padding: 12px 12px; font-size: 15px; } }
+
+/* ---------- the coach, one swipe to the right of the log ---------- */
+.app { position: relative; overflow: hidden; }
+main#scroll { touch-action: pan-y; will-change: transform; }
+.coachbtn { color: var(--green); }
+.coachbtn:hover { background: var(--green-soft); color: var(--green); }
+.coachpage { position: absolute; left: 0; right: 0; top: 64px; bottom: 0; z-index: 15; overflow-y: auto; visibility: hidden; touch-action: pan-y;
+  background: var(--bg); transform: translateX(-100%); will-change: transform; padding: 3vh 22px 220px; }
+.co-in { width: min(560px, 100%); margin: 0 auto; }
+.co-head { display: flex; align-items: center; gap: 10px; color: var(--green); }
+.co-head h2 { margin: 0; font: 600 34px/1.1 var(--serif); color: var(--ink); }
+.co-date { margin: 6px 0 22px; font-size: 13.5px; color: var(--soft); }
+.co-card { position: relative; overflow: hidden; padding: 20px 22px; border-radius: 22px; background: var(--green-soft); }
+.co-text { margin: 0; font: 400 19px/1.55 var(--serif); color: var(--green); }
+:root[data-mode="dark"] .co-text { color: #8FD6B4; }
+.co-text.in { animation: calmin .5s cubic-bezier(.2, .8, .2, 1); }
+.co-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; opacity: 0; background: linear-gradient(90deg, transparent, var(--green), transparent); background-size: 40% 100%; background-repeat: no-repeat; }
+.co-card.thinking .co-bar { opacity: .7; animation: coachbar 1.3s ease-in-out infinite; }
+.co-card.thinking .co-text { opacity: .75; }
+.co-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-top: 16px; }
+.co-stats div { display: flex; flex-direction: column; gap: 3px; padding: 14px 16px; border-radius: 18px; background: rgba(127, 127, 127, .07); }
+.co-stats b { font: 650 22px/1.1 var(--ui); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.co-stats span { font-size: 12px; color: var(--soft); }
+.co-hint { margin: 22px 0 0; text-align: center; font-size: 12px; color: var(--faint); }
+@media (hover: hover) { .co-hint { display: none; } }
+@media (max-width: 620px) { .coachpage { top: 104px; padding: 2vh 18px 230px; } .co-text { font-size: 17.5px; } }
+@media (max-width: 620px) { .co-stats { grid-template-columns: 1fr 1fr; } }
