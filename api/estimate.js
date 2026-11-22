@@ -64,44 +64,92 @@ async function summary(key, s, res) {
   return res.status(200).json({ text: out.text.trim() });
 }
 
-// Free Gemini keys have a separate daily limit per model, so when one model says
-// "quota exceeded" (429) or "not found" (404) the next one in the list is tried.
+// ---------- which Gemini model to use ----------
+// Google retires models now and then, so instead of trusting a fixed name the function
+// asks Google which models this key can use and picks the newest Flash ones.
+let known = null, knownAt = 0;
+async function availableModels(key) {
+  if (known && Date.now() - knownAt < 6 * 3600e3) return known;
+  try {
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", {
+      headers: { "x-goog-api-key": key }, signal: AbortSignal.timeout(5000),
+    });
+    if (r.ok) {
+      const j = await r.json();
+      known = (j.models || [])
+        .filter((m) => (m.supportedGenerationMethods || []).includes("generateContent"))
+        .map((m) => String(m.name || "").replace(/^models\//, ""));
+      knownAt = Date.now();
+    }
+  } catch {}
+  return known || [];
+}
+const version = (name) => { const m = name.match(/^gemini-(\d+(?:\.\d+)?)/); return m ? parseFloat(m[1]) : 0; };
+const plainFlash = (name) => /^gemini-(\d+(\.\d+)?-)?flash(-lite)?(-latest)?$/.test(name); // no preview, image, audio, tts…
+async function pickModels(key, smart) {
+  const all = (await availableModels(key)).filter(plainFlash);
+  const lite = all.filter((n) => n.includes("-lite")), full = all.filter((n) => !n.includes("-lite"));
+  const byNewest = (a, b) => version(b) - version(a) || (a.includes("latest") ? 1 : -1);
+  lite.sort(byNewest); full.sort(byNewest);
+  const found = smart ? [...full, ...lite] : [...lite, ...full];
+  return [...new Set([process.env.GEMINI_MODEL, ...found, ...(smart ? spec.models_smart : spec.models_fast)].filter(Boolean))].slice(0, 6);
+}
+
+// Newer models sometimes reject an option older ones accepted (how thinking is set,
+// or the schema format). When that happens the same model is asked again, more simply.
+function simpler(config, detail, step) {
+  const c = { ...config };
+  if (step === 0 && c.thinkingConfig) { delete c.thinkingConfig; return c; }
+  if (step <= 1 && c.responseSchema) {
+    c.responseJsonSchema = lower(c.responseSchema); delete c.responseSchema; delete c.thinkingConfig; return c;
+  }
+  return null;
+}
+const lower = (n) => Array.isArray(n) ? n.map(lower) : n && typeof n === "object"
+  ? Object.fromEntries(Object.entries(n).map(([k, v]) => [k, k === "type" && typeof v === "string" ? v.toLowerCase() : lower(v)])) : n;
+
 async function gemini(key, list, system, userText, generationConfig) {
-  const models = [...new Set([process.env.GEMINI_MODEL, ...list].filter(Boolean))];
-  let last = { error: "upstream", status: 502 };
+  const smart = list === spec.models_smart;
+  const models = await pickModels(key, smart);
+  const errors = [];
+  let limited = null;
   const t0 = Date.now();
   for (const model of models) {
-    if (Date.now() - t0 > 20000) break; // never keep the person waiting for long
-    const config = model.startsWith("gemini-2.0") ? { ...generationConfig, thinkingConfig: undefined } : generationConfig;
-    let r;
-    try {
-      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: "user", parts: [{ text: userText }] }],
-          generationConfig: config,
-        }),
-        signal: AbortSignal.timeout(15000),
-      });
-    } catch { last = { error: "unreachable", status: 502 }; continue; }
-    if (r.ok) {
-      const out = await r.json();
-      const cand = out.candidates && out.candidates[0];
-      if (!cand || !cand.content) return { text: "" };
-      return { text: (cand.content.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("") };
+    let config = model.startsWith("gemini-2.0") ? { ...generationConfig, thinkingConfig: undefined } : generationConfig;
+    for (let step = 0; step < 3 && Date.now() - t0 < 22000; step++) {
+      let r;
+      try {
+        r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: system }] },
+            contents: [{ role: "user", parts: [{ text: userText }] }],
+            generationConfig: config,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+      } catch { errors.push(`${model}: no answer`); break; }
+      if (r.ok) {
+        const out = await r.json();
+        const cand = out.candidates && out.candidates[0];
+        if (!cand || !cand.content) return { text: "" };
+        return { text: (cand.content.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("") };
+      }
+      const raw = await r.text().catch(() => "");
+      let detail = "";
+      try { detail = String(JSON.parse(raw).error.message || ""); } catch { detail = raw; }
+      detail = detail.replace(/AIza[0-9A-Za-z_-]{20,}/g, "[key]").split("\n")[0].slice(0, 160);
+      console.error("Gemini", model, r.status, detail);
+      if (r.status === 401 || r.status === 403 || (r.status === 400 && /api key/i.test(detail))) return { error: "bad_key", status: 503, detail };
+      if (r.status === 400) { const next = simpler(config, detail, step); if (next) { config = next; continue; } }
+      if (r.status === 429) limited = { error: "rate_limited", status: 429, detail: `${model}: ${detail}` };
+      errors.push(`${model}: ${r.status} ${detail}`);
+      break; // try the next model
     }
-    const raw = await r.text().catch(() => "");
-    let detail = "";
-    try { detail = String(JSON.parse(raw).error.message || ""); } catch { detail = raw; }
-    detail = detail.replace(/AIza[0-9A-Za-z_-]{20,}/g, "[key]").split("\n")[0].slice(0, 220);
-    console.error("Gemini", model, r.status, detail);
-    if (r.status === 401 || r.status === 403 || (r.status === 400 && /api key/i.test(detail))) return { error: "bad_key", status: 503, detail };
-    last = r.status === 429 ? { error: "rate_limited", status: 429, detail } : { error: "upstream", status: 502, detail: `${model}: ${r.status} ${detail}` };
-    // 429 (this model's quota is used up), 404 (unknown model), 5xx (busy): try the next model
   }
-  return last;
+  if (limited && errors.every((e) => / 429 | 404 /.test(e))) return limited;
+  return { error: "upstream", status: 502, detail: (errors.find((e) => !/ 404 /.test(e)) || errors[0] || "no model answered").slice(0, 220) };
 }
 
 function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }

@@ -46,49 +46,86 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(404, {"error": "not_found"})
         super().do_GET()
 
+    _known = None
+
+    def pick_models(self, key, spec, smart):
+        """Asks Google which models this key can use and prefers the newest Flash ones, like api/estimate.js."""
+        if Handler._known is None:
+            try:
+                req = urllib.request.Request("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", headers={"x-goog-api-key": key})
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    data = json.load(r)
+                Handler._known = [m["name"].split("/", 1)[-1] for m in data.get("models", []) if "generateContent" in m.get("supportedGenerationMethods", [])]
+            except Exception:
+                Handler._known = []
+        import re
+        flash = [n for n in Handler._known if re.match(r"^gemini-(\d+(\.\d+)?-)?flash(-lite)?(-latest)?$", n)]
+        ver = lambda n: float((re.match(r"^gemini-(\d+(?:\.\d+)?)", n) or [None, 0])[1] or 0)
+        lite = sorted([n for n in flash if "-lite" in n], key=ver, reverse=True)
+        full = sorted([n for n in flash if "-lite" not in n], key=ver, reverse=True)
+        found = full + lite if smart else lite + full
+        models = [os.environ.get("GEMINI_MODEL")] + found + spec["models_smart" if smart else "models_fast"]
+        return [m for m in dict.fromkeys(models) if m][:6]
+
+    @staticmethod
+    def lower(n):
+        if isinstance(n, list):
+            return [Handler.lower(x) for x in n]
+        if isinstance(n, dict):
+            return {k: (v.lower() if k == "type" and isinstance(v, str) else Handler.lower(v)) for k, v in n.items()}
+        return n
+
     def gemini(self, key, spec, system, text, config, smart=False):
-        """Tries the model list like api/estimate.js. Returns the text, or None after answering with an error."""
-        models = [m for m in [os.environ.get("GEMINI_MODEL")] + spec["models_smart" if smart else "models_fast"] if m]
-        models = list(dict.fromkeys(models))
-        last = (502, {"error": "upstream"})
-        for model in models:
+        """Tries the available models; asks again more simply when a newer model rejects an option.
+        Returns the text, or None after answering with an error."""
+        errors, limited = [], None
+        for model in self.pick_models(key, spec, smart):
             cfg = dict(config)
             if model.startswith("gemini-2.0"):
                 cfg.pop("thinkingConfig", None)
-            payload = {
-                "systemInstruction": {"parts": [{"text": system}]},
-                "contents": [{"role": "user", "parts": [{"text": text}]}],
-                "generationConfig": cfg,
-            }
-            req = urllib.request.Request(
-                "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
-                data=json.dumps(payload).encode(),
-                headers={"content-type": "application/json", "x-goog-api-key": key},
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=15) as r:
-                    msg = json.load(r)
-            except urllib.error.HTTPError as e:
-                raw = e.read().decode(errors="replace")
+            for step in range(3):
+                payload = {
+                    "systemInstruction": {"parts": [{"text": system}]},
+                    "contents": [{"role": "user", "parts": [{"text": text}]}],
+                    "generationConfig": cfg,
+                }
+                req = urllib.request.Request(
+                    "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
+                    data=json.dumps(payload).encode(),
+                    headers={"content-type": "application/json", "x-goog-api-key": key},
+                )
                 try:
-                    detail = str(json.loads(raw)["error"]["message"]).split("\n")[0][:220]
+                    with urllib.request.urlopen(req, timeout=15) as r:
+                        msg = json.load(r)
+                except urllib.error.HTTPError as e:
+                    raw = e.read().decode(errors="replace")
+                    try:
+                        detail = str(json.loads(raw)["error"]["message"]).split("\n")[0][:160]
+                    except Exception:
+                        detail = raw[:160]
+                    sys.stderr.write("Gemini %s %s: %s\n" % (model, e.code, detail))
+                    if e.code in (401, 403) or (e.code == 400 and "api key" in detail.lower()):
+                        self.send_json(503, {"error": "bad_key", "detail": detail})
+                        return None
+                    if e.code == 400 and step == 0 and "thinkingConfig" in cfg:
+                        cfg.pop("thinkingConfig"); continue
+                    if e.code == 400 and step <= 1 and "responseSchema" in cfg:
+                        cfg["responseJsonSchema"] = self.lower(cfg.pop("responseSchema")); cfg.pop("thinkingConfig", None); continue
+                    if e.code == 429:
+                        limited = {"error": "rate_limited", "detail": "%s: %s" % (model, detail)}
+                    errors.append("%s: %s %s" % (model, e.code, detail))
+                    break
                 except Exception:
-                    detail = raw[:220]
-                sys.stderr.write("Gemini %s %s: %s\n" % (model, e.code, detail))
-                if e.code in (401, 403) or (e.code == 400 and "api key" in detail.lower()):
-                    self.send_json(503, {"error": "bad_key", "detail": detail})
-                    return None
-                last = (429, {"error": "rate_limited", "detail": detail}) if e.code == 429 else (502, {"error": "upstream", "detail": "%s: %s %s" % (model, e.code, detail)})
-                continue
-            except Exception as e:
-                sys.stderr.write("Gemini unreachable: %s\n" % e)
-                last = (502, {"error": "unreachable"})
-                continue
-            cands = msg.get("candidates") or []
-            if not cands or not cands[0].get("content"):
-                return ""
-            return "".join(p.get("text", "") for p in cands[0]["content"].get("parts", []) if not p.get("thought"))
-        self.send_json(*last)
+                    errors.append("%s: no answer" % model)
+                    break
+                cands = msg.get("candidates") or []
+                if not cands or not cands[0].get("content"):
+                    return ""
+                return "".join(p.get("text", "") for p in cands[0]["content"].get("parts", []) if not p.get("thought"))
+        if limited and all((" 429 " in e or " 404 " in e) for e in errors):
+            self.send_json(429, limited)
+        else:
+            self.send_json(502, {"error": "upstream", "detail": (next((e for e in errors if " 404 " not in e), errors[0] if errors else "no model answered"))[:220]})
         return None
 
     def do_POST(self):

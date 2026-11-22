@@ -46,6 +46,10 @@ const T = [
   [['peanut butter', 'masło orzechowe'], '1 tbsp', '1 łyżka', 16, 588, 25, 20, 50],
   [['chocolate', 'czekolad'], '4 squares', '4 kostki', 25, 546, 5, 61, 31],
   [['cookie', 'biscuit', 'ciastk'], '2 cookies', '2 ciastka', 30, 480, 5.5, 65, 22],
+  [['cupcake', 'muffin', 'babeczk', 'mufink'], '1 cupcake', '1 babeczka', 70, 380, 4.5, 52, 17],
+  [['donut', 'doughnut', 'pączek', 'paczek', 'pączk'], '1 donut', '1 pączek', 70, 420, 6, 49, 23],
+  [['croissant', 'rogalik'], '1 croissant', '1 rogalik', 60, 406, 8, 46, 21],
+  [['jam', 'jelly', 'dżem', 'dzem', 'konfitur'], '1 tbsp', '1 łyżka', 20, 250, 0.4, 62, 0.1],
   [['cake', 'ciasto', 'sernik'], '1 slice', '1 kawałek', 100, 320, 5, 40, 16],
   [['ice cream', 'lody'], '2 scoops', '2 gałki', 100, 207, 3.5, 24, 11],
   [['beer', 'piwo', 'piwa'], '1 bottle', '1 butelka', 500, 43, 0.5, 3.6, 0],
@@ -61,6 +65,26 @@ const T = [
 const WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, half: .5, jeden: 1, jedna: 1, jedno: 1, dwa: 2, dwie: 2, trzy: 3, cztery: 4, pięć: 5, pół: .5, pol: .5 };
 
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// one wrong letter is fine: "salamon" still finds salmon, "bananna" still finds banana
+function near(a, b) {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+const WORDS1 = T.flatMap((row, i) => row[0].filter(a => /^[\p{L}]{5,}$/u.test(a)).map(a => ({ a, i })));
+function fuzzy(part) {
+  for (const w of part.split(/[^\p{L}]+/u)) {
+    if (w.length < 5) continue;
+    const hit = WORDS1.find(x => near(w, x.a) || (w.length > x.a.length && near(w.slice(0, x.a.length + 1), x.a) && w.startsWith(x.a.slice(0, 3))));
+    if (hit) return hit;
+  }
+  return null;
+}
 const ALIASES = T.flatMap((row, i) => row[0].map(a => ({ a, i }))).sort((x, y) => y.a.length - x.a.length)
   .map(x => ({ ...x, re: new RegExp('(^|[^\\p{L}])' + esc(x.a), 'u') }));
 
@@ -68,7 +92,7 @@ export function lookup(text, lang) {
   const parts = text.toLowerCase().split(/,|\+|&|\s+(?:and|with|plus|i|z|ze|oraz)\s+/u).map(s => s.trim()).filter(Boolean);
   const items = [];
   for (const part of parts) {
-    const hit = ALIASES.find(x => x.re.test(part));
+    const hit = ALIASES.find(x => x.re.test(part)) || fuzzy(part);
     if (!hit) continue;
     const [, pEn, pPl, per, kcal, p, c, f] = T[hit.i];
     let grams = per, portion = lang === 'pl' ? pPl : pEn;

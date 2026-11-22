@@ -248,22 +248,33 @@ const span = () => Math.min(320, geo ? geo.height - geo.b.height : 320); // how 
 function paint(kind, p) {
   const el = panels[kind]; if (!el || !geo) return;
   const q = Math.max(0, Math.min(1, p)), k = 1 - q, g = geo, pc = Math.min(p, 1.03);
-  const c = el.querySelector('.pan-c'), f = Math.max(0, Math.min(1, (p - 0.18) / 0.62));
+  const c = el.querySelector('.pan-c'), f = Math.max(0, Math.min(1, (p - (kind === 'up' ? 0.18 : 0.1)) / (kind === 'up' ? 0.62 : 0.5)));
   el.style.visibility = p > 0.002 ? 'visible' : 'hidden';
   c.style.opacity = f;
   if (kind === 'up') {
     const top = (g.height - g.b.height) * k;
     el.querySelector('.pan-box').style.clipPath = `inset(${top}px 0px 0px 0px round 24px)`;
     c.style.transform = `translateY(${(1 - pc) * 46}px)`;
+    el.style.transform = `scaleX(${1 - 0.035 * Math.sin(Math.PI * q)})`;
+    c.style.filter = f < 0.98 ? `blur(${(1 - f) * 4}px)` : 'none';
   } else {
-    // the bar itself stretches out to both sides; what was on it slides away, the strip slides in
-    const L = g.b.left + (g.left - g.b.left) * q, W = g.b.width + (g.width - g.b.width) * q;
-    el.style.left = L + 'px'; el.style.width = W + 'px';
+    // The bar stretches out to both sides like something elastic being pulled: the edge you
+    // pull leads, the other edge follows a moment later, and the bar dips a little in height
+    // at the middle of the stretch before it settles. What was on it slides out softly,
+    // and the strip's content slides in from the side you pulled toward.
+    const dir = kind === 'ai' ? -1 : 1, s2 = Math.min(Math.max(p, 0), 1.02);
+    const lead = 1 - Math.pow(1 - Math.min(s2, 1), 1.6) + Math.max(0, s2 - 1), lag = Math.pow(s2, 1.45);
+    const qL = dir < 0 ? lead : lag, qR = dir < 0 ? lag : lead;
+    const bR = g.b.left + g.b.width, R0 = g.left + g.width;
+    const L = g.b.left + (g.left - g.b.left) * qL, R = bR + (R0 - bR) * qR;
+    el.style.left = L + 'px'; el.style.width = (R - L) + 'px';
+    el.style.transform = `scaleY(${1 - 0.06 * Math.sin(Math.PI * q)})`;
     c.style.left = (g.left - L) + 'px';
-    const dir = kind === 'ai' ? -1 : 1;
-    c.style.transform = `translateX(${(1 - pc) * -dir * 60}px)`;
-    bar.style.setProperty('--slide', `${dir * Math.min(pc, 1) * 110}px`);
+    c.style.transform = `translateX(${(1 - pc) * -dir * 48}px)`;
+    c.style.filter = f < 0.98 ? `blur(${(1 - f) * 5}px)` : 'none';
+    bar.style.setProperty('--slide', `${dir * Math.min(pc, 1) * 120}px`);
     bar.style.setProperty('--fade', Math.max(0, 1 - q * 1.8));
+    bar.style.setProperty('--blur', `${Math.min(q * 2, 1) * 5}px`);
   }
   bar.style.setProperty('--open', q);
 }
@@ -276,7 +287,7 @@ function place(kind) {
 }
 function resetBar(kind) {
   bar.classList.remove('k-' + kind, 'sided');
-  bar.style.removeProperty('--slide'); bar.style.removeProperty('--fade');
+  bar.style.removeProperty('--slide'); bar.style.removeProperty('--fade'); bar.style.removeProperty('--blur');
   if (openKind === kind) { openKind = null; bar.classList.remove('lifted'); bar.style.setProperty('--open', 0); }
 }
 function begin(kind) { // first frame of an opening: fill it, measure it, let the wind blow
@@ -325,6 +336,7 @@ function onDown(ev) {
   if (ev.pointerType === 'mouse' && ev.button !== 0) return;
   const src = ev.currentTarget === bar ? 'bar' : 'panel';
   if (src === 'panel' && ev.target.closest('.ai-seg')) return; // let text be selected and buttons pressed
+  bar.classList.add('held');
   drag = { src, node: ev.currentTarget, id: ev.pointerId, x0: ev.clientX, y0: ev.clientY, axis: null, mode: null, samples: [] };
 }
 function sample(p) { const now = performance.now(); drag.samples.push([now, p]); while (drag.samples.length > 2 && now - drag.samples[0][0] > 90) drag.samples.shift(); }
@@ -371,7 +383,7 @@ function onMove(ev) {
 }
 function onUp(ev) {
   if (!drag || ev.pointerId !== drag.id) return;
-  const d = drag; drag = null; document.body.classList.remove('pulling');
+  const d = drag; drag = null; document.body.classList.remove('pulling'); bar.classList.remove('held');
   const dx = ev.clientX - d.x0;
   if (!d.axis) { // a tap
     if (d.src === 'bar') { if (openKind) closeSummary(); else openSummary('up'); }

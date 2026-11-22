@@ -417,14 +417,10 @@ h1 span { display: inline-block; transform-origin: 50% 100%; animation: sway 3.2
 /* ---------- the bar unfolds: up, left (AI) and right (trends) ---------- */
 .bar { cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
 body.pulling, body.pulling * { cursor: grabbing !important; user-select: none !important; }
-.bar::before { content: ""; position: absolute; left: 50%; top: 5px; width: 30px; height: 4px; margin-left: -15px; border-radius: 4px; background: rgba(127, 127, 127, .25); transition: background .2s; }
-.bar:hover::before { background: rgba(127, 127, 127, .4); }
-.bar::after { /* faint hints at both ends: pull me sideways */
-  content: ""; position: absolute; top: 50%; width: 4px; height: 26px; margin-top: -13px; border-radius: 4px; left: 6px;
-  background: rgba(127, 127, 127, .18); box-shadow: calc(min(640px, 100vw - 28px) - 16px) 0 0 rgba(127, 127, 127, .18); opacity: calc(1 - var(--open, 0)); transition: opacity .2s; }
 .pan { position: fixed; z-index: 19; visibility: hidden; pointer-events: none; filter: drop-shadow(0 22px 34px rgba(30, 24, 10, .2)) drop-shadow(0 1px 2px rgba(0, 0, 0, .05)); }
 :root[data-mode="dark"] .pan { filter: drop-shadow(0 22px 34px rgba(0, 0, 0, .55)); }
 .pan.live { pointer-events: auto; }
+.pan-up { transform-origin: 50% 100%; }
 .pan-box { position: absolute; inset: 0; border-radius: 24px; overflow: hidden; background: color-mix(in srgb, var(--card) 96%, var(--green) 4%); clip-path: inset(100% 0 0 0 round 24px); will-change: clip-path; touch-action: none; display: flex; flex-direction: column; }
 :root[data-mode="dark"] .pan-box { background: #262523; }
 .pan-c { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; will-change: transform, opacity; }
@@ -440,10 +436,10 @@ body.pulling, body.pulling * { cursor: grabbing !important; user-select: none !i
 .sum-track > section { flex: 0 0 100%; min-width: 0; padding: 14px 22px 10px; overflow-y: auto; scrollbar-width: none; touch-action: pan-y; }
 
 /* sideways: the bar stretches into a long strip at its own height */
-.bar > .b-left, .bar > .b-right { transform: translateX(var(--slide, 0)); opacity: var(--fade, 1); }
+.bar > .b-left, .bar > .b-right { transform: translateX(var(--slide, 0)); opacity: var(--fade, 1); filter: blur(var(--blur, 0px)); }
 .bar.sided { background: transparent; border-color: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
-.bar.sided::before, .bar.sided::after { opacity: 0; }
-.pan-ai, .pan-trend { z-index: 21; filter: none; overflow: hidden; border-radius: 24px;
+.bar.sided:not(.held) { pointer-events: none; } /* once a strip is out, touches go to the strip */
+.pan-ai, .pan-trend { z-index: 19; filter: none; overflow: hidden; border-radius: 24px; transform-origin: 50% 100%; will-change: left, width, transform;
   background: var(--glass); border: .5px solid var(--glass-line);
   backdrop-filter: blur(22px) saturate(1.5); -webkit-backdrop-filter: blur(22px) saturate(1.5);
   box-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 18px 44px -14px rgba(30, 24, 10, .28); }
@@ -457,7 +453,7 @@ body.pulling, body.pulling * { cursor: grabbing !important; user-select: none !i
 .ai-spark { color: var(--green); display: grid; }
 .ai-seg { width: 140px; min-width: 0; }
 .ai-seg button { padding: 5px 0; font-size: 11.5px; }
-.s-ai-out { position: relative; flex: 1; min-width: 0; align-self: stretch; display: flex; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; touch-action: pan-y; padding: 10px 0; }
+.s-ai-out { position: relative; flex: 1; min-width: 0; align-self: stretch; display: flex; overflow-y: auto; overscroll-behavior: contain; margin: 0; min-height: 0; scrollbar-width: none; touch-action: pan-y; padding: 10px 0; }
 .s-ai-out::-webkit-scrollbar { width: 0; }
 .s-ai-hint { margin: auto 0; font-size: 13px; color: var(--soft); line-height: 1.45; }
 .ai-detail { display: block; margin-top: 4px; font-size: 11px; color: var(--faint); word-break: break-word; }
@@ -530,16 +526,6 @@ body.pulling, body.pulling * { cursor: grabbing !important; user-select: none !i
 .s-avgmac .ic { grid-row: span 2; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 10px; background: color-mix(in srgb, var(--mc) 16%, transparent); }
 .s-avgmac b { font: 600 15px/1.1 var(--ui); font-variant-numeric: tabular-nums; } .s-avgmac b i { font-style: normal; }
 .s-avgmac span:last-child { font-size: 11.5px; color: var(--soft); }
-.s-ai-btns { display: flex; gap: 8px; }
-.s-ai-btns button { flex: 1; border: 0; border-radius: 14px; padding: 12px 10px; font: 600 13px/1 var(--ui); cursor: pointer; color: var(--green); background: var(--green-soft); transition: transform .25s var(--spring-soft), background .2s, box-shadow .2s; }
-.s-ai-btns button:hover { transform: translateY(-1px); }
-.s-ai-btns button.on { box-shadow: inset 0 0 0 1.5px var(--green); }
-.s-ai-out { margin-top: 16px; min-height: 64px; }
-.s-ai-hint { margin: 0; font-size: 13px; color: var(--soft); line-height: 1.5; }
-.s-ai-think { margin: 10px 0 0; font-size: 12.5px; text-align: center; background: linear-gradient(90deg, var(--w3), var(--w1), var(--w5), var(--w2), var(--w3)); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: colorslide 2.4s linear infinite; }
-.ai-text { margin: 0; font: 400 16px/1.6 var(--serif); color: var(--green); white-space: pre-wrap; }
-:root[data-mode="dark"] .ai-text { color: #8FD6B4; }
-
 /* ---------- settings: a calm, grouped card ---------- */
 .sheet { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; background: rgba(20, 16, 8, .24);
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); opacity: 0; pointer-events: none; transition: opacity .25s; }
