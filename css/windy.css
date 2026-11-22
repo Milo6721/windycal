@@ -1145,3 +1145,47 @@ main#scroll { touch-action: pan-y; will-change: transform; }
 @media (hover: hover) { .co-hint { display: none; } }
 @media (max-width: 620px) { .coachpage { top: 104px; padding: 2vh 18px 230px; } .co-text { font-size: 17.5px; } }
 @media (max-width: 620px) { .co-stats { grid-template-columns: 1fr 1fr; } }
+
+/* ---------- estimating: soft glowing lights that breathe, with tiny twinkles (the text itself stays still) ---------- */
+:root { --g1: #3FB48A; --g2: #7FD3A8; --g3: #5CC7C9; --g4: #B9E4A2; }
+:root[data-mode="dark"] { --g1: #4CCB9C; --g2: #8BE3B7; --g3: #6FD6D6; --g4: #C6EDB0; }
+.log .row.thinking .l::before {
+  display: block !important; content: ""; position: absolute; inset: -16px -24px; z-index: 0; pointer-events: none; border-radius: 26px; filter: blur(16px);
+  background:
+    radial-gradient(28% 70% at 18% 50%, var(--g1), transparent 70%),
+    radial-gradient(26% 80% at 46% 40%, var(--g3), transparent 70%),
+    radial-gradient(30% 70% at 74% 60%, var(--g2), transparent 70%),
+    radial-gradient(22% 60% at 92% 40%, var(--g4), transparent 70%) !important;
+  background-size: 180% 100% !important; background-repeat: no-repeat;
+  opacity: .5; animation: glowdrift 3.6s ease-in-out infinite alternate, glowpulse 1.8s ease-in-out infinite !important;
+}
+.log .row.thinking .l::after {
+  display: block !important; content: ""; position: absolute; inset: -6px -10px; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 30%, #fff 0 1.4px, transparent 2.2px),
+    radial-gradient(circle at 31% 78%, #fff 0 1.1px, transparent 1.9px),
+    radial-gradient(circle at 52% 22%, #fff 0 1.6px, transparent 2.4px),
+    radial-gradient(circle at 68% 70%, #fff 0 1.2px, transparent 2px),
+    radial-gradient(circle at 86% 35%, #fff 0 1.4px, transparent 2.2px) !important;
+  filter: drop-shadow(0 0 3px var(--g2)); opacity: 0; animation: twinkles 1.6s ease-in-out infinite !important;
+}
+.log .row.thinking .l::after { animation-delay: .3s !important; }
+@keyframes glowdrift { from { background-position: 0% 0; } to { background-position: 100% 0; } }
+@keyframes glowpulse { 0%, 100% { opacity: .34; transform: scale(.98); } 50% { opacity: .62; transform: scale(1.03); } }
+@keyframes twinkles { 0%, 100% { opacity: 0; transform: scale(.85); } 45% { opacity: .9; transform: scale(1); } 70% { opacity: .35; } }
+.log .row.thinking .txt { position: relative; z-index: 1; }
+/* the glow fades out softly when the answer lands */
+.log .row.landed .l::before { display: block !important; content: ""; position: absolute; inset: -16px -24px; z-index: 0; pointer-events: none; border-radius: 26px; filter: blur(16px);
+  background: radial-gradient(40% 80% at 50% 50%, var(--g2), transparent 70%) !important; animation: glowout .9s ease-out both !important; }
+@keyframes glowout { from { opacity: .5; } to { opacity: 0; transform: scale(1.08); } }
+@media (prefers-reduced-motion: reduce) { .log .row.thinking .l::before { animation: none !important; opacity: .4; } .log .row.thinking .l::after { display: none !important; } }
+/* the words stay plain text (a gradient on a text field can render as a solid bar); they breathe softly instead */
+.log .row.thinking .txt { background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important;
+  -webkit-text-fill-color: var(--ink) !important; color: var(--ink) !important; animation: textbreathe 1.8s ease-in-out infinite !important; }
+@keyframes textbreathe { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@keyframes glowpulse { 0%, 100% { opacity: .55; transform: scale(.98); } 50% { opacity: .95; transform: scale(1.04); } }
+.log .row.thinking .l::before { filter: blur(13px) saturate(1.4) !important; }
+:root[data-mode="dark"] .log .row.thinking .l::before { filter: blur(13px) saturate(1.2) brightness(.9) !important; }
+:root { --g1: #1FB07B; --g2: #4FCB8F; --g3: #27BCC4; --g4: #8FD663; }
+:root[data-mode="dark"] { --g1: #2FC48C; --g2: #5ED99E; --g3: #34CDD4; --g4: #9EE070; }
+.log .row.thinking .l::before { inset: -12px -20px !important; }
