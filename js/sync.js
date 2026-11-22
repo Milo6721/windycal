@@ -9,7 +9,7 @@ const listeners = new Set();
 let conf = null;               // { code, rev, last }
 let keyCache = null, idCache = null;
 let status = 'off';            // off | syncing | ok | offline | no_store | error
-let timer = 0, running = null, again = false;
+let timer = 0, running = null, again = false, pollT = 0, hot = 0;
 
 try { conf = JSON.parse(localStorage.getItem(LS) || 'null'); } catch {}
 const persist = () => { try { conf ? localStorage.setItem(LS, JSON.stringify(conf)) : localStorage.removeItem(LS); } catch {} };
@@ -62,7 +62,7 @@ const snapshot = () => ({ v: 1, days: state.days, dayMod: state.dayMod || {}, wa
 
 // Newer wins, day by day. Returns whether anything here changed, and whether the server is behind.
 function merge(remote) {
-  let changedHere = false, serverBehind = false;
+  let changedHere = false, serverBehind = false, settingsChanged = false;
   const join = !!conf.join; // a device that just joined takes what is already there when times are equal
   const keysAll = new Set([...Object.keys(state.days), ...Object.keys(remote.days || {}), ...Object.keys(remote.dayMod || {})]);
   for (const k of keysAll) {
@@ -76,9 +76,9 @@ function merge(remote) {
     if (r && (!l || r.mod > l.mod)) { state.water = state.water || {}; state.water[k] = r; changedHere = true; }
     else if (l && (!r || l.mod > r.mod)) serverBehind = true;
   }
-  if (remote.settings && ((remote.settingsMod || 0) > (state.settingsMod || 0) || (join && (remote.settingsMod || 0) === (state.settingsMod || 0)))) { state.settings = remote.settings; state.settingsMod = remote.settingsMod; changedHere = true; }
+  if (remote.settings && ((remote.settingsMod || 0) > (state.settingsMod || 0) || (join && (remote.settingsMod || 0) === (state.settingsMod || 0)))) { if (JSON.stringify(remote.settings) !== JSON.stringify(state.settings)) settingsChanged = true; state.settings = remote.settings; state.settingsMod = remote.settingsMod; changedHere = true; }
   else if ((state.settingsMod || 0) > (remote.settingsMod || 0)) serverBehind = true;
-  return { changedHere, serverBehind };
+  return { changedHere, serverBehind, settingsChanged };
 }
 
 // Pull, merge, and push back if this device had something newer. Safe to call any time.
@@ -93,16 +93,17 @@ export async function syncNow() {
         const got = await call({ op: 'get', id });
         if (got.status === 503) return setStatus('no_store');
         if (got.status !== 200) return setStatus('error');
+        conf.rev = got.rev || '0';
         let result = { changedHere: false, serverBehind: true };
         if (got.data) {
           let remote;
           try { remote = await unlock(got.data); } catch { return setStatus('error'); }
           result = merge(remote);
-          if (result.changedHere) { save({ fromSync: true }); dispatchEvent(new Event('windy:synced')); }
+          if (result.changedHere) { save({ fromSync: true }); dispatchEvent(new CustomEvent('windy:synced', { detail: { settings: result.settingsChanged } })); }
         }
         if (!result.serverBehind) break;
         const put = await call({ op: 'put', id, data: await lock(snapshot()), rev: got.rev || '0' });
-        if (put.status === 200) break;
+        if (put.status === 200) { conf.rev = put.rev; break; }
         if (put.status !== 409) return setStatus(put.status === 503 ? 'no_store' : 'error');
         // another device saved in between: read again and merge with that
       }
@@ -118,23 +119,47 @@ export async function syncNow() {
 export function startSync(code) {
   conf = { code: code ? cleanCode(code).match(/.{4}/g).join('-') : newCode(), last: 0, join: !!code };
   keyCache = idCache = null; persist(); setStatus('syncing');
-  return syncNow();
+  return syncNow().then(() => schedule());
 }
-export function stopSync() { conf = null; keyCache = idCache = null; persist(); setStatus('off'); }
+export function stopSync() { clearTimeout(pollT); conf = null; keyCache = idCache = null; persist(); setStatus('off'); }
 export const canJoin = validCode;
 export const syncLink = () => conf ? `${location.origin}${location.pathname}#sync=${conf.code}` : '';
 
-export function initSync() {
-  // joining from a link: …/#sync=XXXX-XXXX-XXXX-XXXX
+// joining from a link: …/#sync=XXXX-XXXX-XXXX-XXXX (also when Windy is already open in that tab)
+function joinFromLink() {
   const m = location.hash.match(/sync=([0-9A-Za-z-]{16,24})/);
-  if (m && validCode(m[1])) {
-    history.replaceState(null, '', location.pathname + location.search);
-    if (!conf || cleanCode(conf.code) !== cleanCode(m[1])) { startSync(m[1]); dispatchEvent(new Event('windy:joined')); }
-  }
+  if (!m || !validCode(m[1])) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  if (!conf || cleanCode(conf.code) !== cleanCode(m[1])) { startSync(m[1]); dispatchEvent(new Event('windy:joined')); }
+}
+export function initSync() {
+  joinFromLink();
+  addEventListener('hashchange', joinFromLink);
   if (conf) setStatus('ok');
-  addEventListener('windy:saved', () => { if (!conf) return; clearTimeout(timer); timer = setTimeout(syncNow, 2500); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow(); });
+  addEventListener('windy:saved', () => { if (!conf) return; hot = Date.now(); clearTimeout(timer); timer = setTimeout(syncNow, 700); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { syncNow(); schedule(0); } });
   addEventListener('online', () => syncNow());
-  setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, 60000);
-  syncNow();
+  syncNow().then(() => schedule());
+}
+
+// While Windy is open, it asks the server every few seconds only "which version is the newest?"
+// (one tiny read). When another device saved something, it fetches and shows it right away.
+// Busy moments are checked every 2.5 seconds, quiet ones every 5; nothing is checked while hidden.
+function schedule(ms) {
+  clearTimeout(pollT);
+  if (!conf) return;
+  pollT = setTimeout(poll, ms != null ? ms : Date.now() - hot < 120000 ? 2500 : 5000);
+}
+async function poll() {
+  if (!conf) return;
+  if (document.visibilityState !== 'visible') return; // resumes on visibilitychange
+  if (!running && navigator.onLine !== false && status !== 'no_store') {
+    try {
+      const { id } = await keys();
+      const r = await call({ op: 'rev', id });
+      if (r.status === 200 && conf && String(r.rev) !== String(conf.rev || '0')) { hot = Date.now(); await syncNow(); }
+      else if (r.status === 503) setStatus('no_store');
+    } catch {}
+  }
+  schedule();
 }

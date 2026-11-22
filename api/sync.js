@@ -2,6 +2,7 @@
 // before sending it, so this function only ever stores a locked box it cannot open.
 // Storage: an Upstash Redis database connected in Vercel (Storage → Upstash), which adds
 // KV_REST_API_URL and KV_REST_API_TOKEN (or UPSTASH_REDIS_REST_URL / _TOKEN) to the project.
+//   { op: "rev", id }                → { rev }   (cheap check, asked every few seconds)
 //   { op: "get", id }                → { data, rev }
 //   { op: "put", id, data, rev }     → { ok: true, rev } or 409 { rev } when another device saved first
 
@@ -57,6 +58,10 @@ export default async function handler(req, res) {
   if (!/^[a-f0-9]{64}$/.test(id)) return res.status(400).json({ error: "bad_id" });
   const k = `windy:${id}`, kr = `windy:${id}:rev`;
   try {
+    if (body.op === "rev") { // the cheap "anything new?" check
+      const rev = await redis(["GET", kr]);
+      return res.status(200).json({ rev: rev || "0" });
+    }
     if (body.op === "get") {
       const [data, rev] = await redis(["MGET", k, kr]);
       return res.status(200).json({ data: data || null, rev: rev || "0" });

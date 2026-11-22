@@ -284,7 +284,7 @@ h1 span { display: inline-block; transform-origin: 50% 100%; animation: sway 3.2
 
 /* ---------- the caret: a thin green reed that sways as you type ---------- */
 .txt.txt { caret-color: transparent; }
-.caret { position: fixed; left: 0; top: 0; z-index: 4; width: 2px; pointer-events: none; will-change: transform; transition: transform .09s ease-out; }
+.caret { position: absolute; left: 0; top: 0; z-index: 4; width: 2px; pointer-events: none; will-change: transform; transition: transform .09s ease-out; }
 .caret[hidden] { display: none; }
 .caret i { position: absolute; inset: 2px 0; border-radius: 2px; background: var(--green); transform-origin: 50% 100%; animation: blink 1.1s ease-in-out infinite; }
 .caret svg { position: absolute; left: 5px; top: -3px; width: 16px; height: 12px; fill: none; stroke: var(--green); stroke-width: 1.5; stroke-linecap: round; opacity: 0; }
@@ -718,3 +718,12 @@ body.swipe-lock, body.swipe-lock * { user-select: none !important; -webkit-user-
 .sync-st.error i, .sync-st.no_store i { background: #D5584F; } .sync-st.offline i { background: var(--faint); }
 .grp.sync .fine { margin: 12px 0 0; }
 @media (max-width: 420px) { .bar { gap: 8px; } .water { margin: 0 0 0 2px; } .b-kcal .small { font-size: 11px; } }
+
+/* a line that just arrived from your other device */
+.row.arrived .l::before { opacity: 0; animation: arrive 1.3s cubic-bezier(.3, 0, .2, 1) both; background: var(--green); filter: blur(14px); }
+@keyframes arrive { 0% { opacity: 0; transform: scaleX(.6); } 25% { opacity: .22; } 100% { opacity: 0; transform: scaleX(1.05); } }
+.row.arrived .r { animation: land .6s var(--spring-soft); }
+
+/* typing on the empty line never runs under the camera and mic buttons */
+.row.draft .txt { padding-right: 70px; }
+.row.draft.no-cam .txt { padding-right: 36px; }

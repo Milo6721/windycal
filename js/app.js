@@ -118,7 +118,7 @@ function makeRow(e) {
   row.querySelector('.mic').addEventListener('click', () => dictate(row));
   const x = row.querySelector('.x'); x.title = t('mDelete'); x.setAttribute('aria-label', t('mDelete'));
   x.addEventListener('click', () => { clearTimeout(row._t); ta.value = ''; commit(row); });
-  if (e) { rows.set(e.id, row); paint(row, false); }
+  if (e) { rows.set(e.id, row); row._sig = sig(e); paint(row, false); }
   return row;
 }
 
@@ -248,6 +248,44 @@ function renderLog() {
   clr.onclick = clearDay; log.append(clr);
   placeDividers(); fitAll(); updateHint();
   rendering = false;
+}
+
+// Changes from your other device are woven into the list in place: new lines slide in with a
+// green glow, deleted ones fold away, changed ones update their numbers. Nothing reloads,
+// and the line you are typing in is never touched.
+const sig = e => JSON.stringify([e.text, e.items, e.mult, e.status, e.photo ? 1 : 0]);
+function weaveRemote() {
+  paintWater(true);
+  if (view === 'weekly') { refreshAll(); return; }
+  const log = $('log'), entries = list(curKey()), ids = new Set(entries.map(e => e.id));
+  const typing = document.activeElement?.closest?.('.row');
+  rendering = true;
+  for (const [id, row] of [...rows]) {
+    if (ids.has(id) || row === typing) continue;
+    rows.delete(id); tokens.delete(id); row._e = null;
+    row.style.height = row.offsetHeight + 'px'; row.classList.add('out');
+    requestAnimationFrame(() => { row.style.height = '0'; row.style.padding = '0'; });
+    setTimeout(() => { row.remove(); placeDividers(); updateHint(); }, 320);
+  }
+  let anchor = null; // keep the same order as the list
+  for (const e of entries) {
+    let row = rows.get(e.id);
+    if (!row) {
+      row = makeRow(e); row._sig = sig(e);
+      const next = anchor ? anchor.nextElementSibling : log.querySelector('.row');
+      log.insertBefore(row, next && next.classList?.contains('row') ? next : draftRow());
+      fit(row.querySelector('.txt'));
+      row.classList.add('in', 'arrived'); setTimeout(() => row.classList.remove('in', 'arrived'), 1400);
+    } else if (row._sig !== sig(e) && row !== typing) {
+      row._sig = sig(e); row._e = e;
+      const ta = row.querySelector('.txt'); ta.value = e.text; fit(ta);
+      paint(row, true);
+      row.classList.remove('arrived'); void row.offsetWidth; row.classList.add('arrived'); setTimeout(() => row.classList.remove('arrived'), 1400);
+    }
+    anchor = row;
+  }
+  rendering = false;
+  placeDividers(); updateHint(); refreshAll(); paintDetail();
 }
 
 // "Same as yesterday" for breakfast, or a quiet hello on an empty page.
@@ -606,12 +644,15 @@ function placeCaret(gust) {
   const ta = document.activeElement;
   if (!ta?.classList?.contains('txt') || ta.selectionStart !== ta.selectionEnd || ta.closest('.row.thinking')) { caret.hidden = true; return; }
   const cs = getComputedStyle(ta);
-  mirror.style.font = cs.font; mirror.style.letterSpacing = cs.letterSpacing; mirror.style.width = ta.clientWidth + 'px';
+  mirror.style.font = cs.font; mirror.style.letterSpacing = cs.letterSpacing; mirror.style.boxSizing = 'border-box'; mirror.style.padding = cs.padding; mirror.style.width = ta.clientWidth + 'px';
   mirror.textContent = ta.value.slice(0, ta.selectionStart);
   const mark = document.createElement('span'); mark.textContent = '​'; mirror.append(mark);
-  const r = ta.getBoundingClientRect(), lh = parseFloat(cs.lineHeight) || 24;
+  // The caret lives inside the line itself, placed from the text's own measurements, so the
+  // phone keyboard, zoom or scrolling can never pull it away from the letters.
+  const host = ta.parentElement, lh = parseFloat(cs.lineHeight) || 24;
+  if (caret.parentElement !== host) { caret.style.transition = 'none'; host.append(caret); requestAnimationFrame(() => { caret.style.transition = ''; }); }
   caret.style.height = lh + 'px';
-  caret.style.transform = `translate(${r.left + mark.offsetLeft}px, ${r.top + mark.offsetTop - ta.scrollTop}px)`;
+  caret.style.transform = `translate(${ta.offsetLeft + mark.offsetLeft}px, ${ta.offsetTop + mark.offsetTop - ta.scrollTop}px)`;
   caret.hidden = false;
   if (gust) { caret.classList.remove('gust'); void caret.offsetWidth; caret.classList.add('gust'); clearTimeout(gustT); gustT = setTimeout(() => caret.classList.remove('gust'), 900); }
 }
@@ -660,7 +701,7 @@ initSummary();
 initWater();
 initTip(() => view);
 // another device changed something: show it
-addEventListener('windy:synced', () => { if (!document.activeElement?.classList?.contains('txt')) applySettings(); else refreshAll(); });
+addEventListener('windy:synced', ev => { if (ev.detail?.settings) applySettings(); else weaveRemote(); });
 addEventListener('windy:joined', () => toast(t('syncJoined')));
 // swipe a line to the left to delete it, in the log and in the Weekly day list
 enableSwipe($('log'), '.row:not(.draft):not(.out)', row => { clearTimeout(row._t); row.querySelector('.txt').value = ''; commit(row); }, () => t('mDelete'));

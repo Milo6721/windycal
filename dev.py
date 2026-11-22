@@ -140,6 +140,8 @@ class Handler(SimpleHTTPRequestHandler):
         if not (len(box_id) == 64 and all(c in "0123456789abcdef" for c in box_id)):
             return self.send_json(400, {"error": "bad_id"})
         data, rev = Handler._boxes.get(box_id, (None, "0"))
+        if body.get("op") == "rev":
+            return self.send_json(200, {"rev": rev})
         if body.get("op") == "get":
             return self.send_json(200, {"data": data, "rev": rev})
         if body.get("op") == "put":
