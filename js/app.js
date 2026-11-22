@@ -11,12 +11,15 @@ import { icon, MACROS } from './icons.js';
 import { initWater, paintWater } from './water.js';
 import { initTip, renderTip } from './tip.js';
 import { initSync } from './sync.js';
+import { openScanner } from './barcode.js';
 
 const $ = id => document.getElementById(id);
 const KEY = 'windy.v1';
 const RING = 125.66;
 const SPARK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 3c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z"/><path d="M18.5 14c.3 2.3 1.2 3.2 3.5 3.5-2.3.3-3.2 1.2-3.5 3.5-.3-2.3-1.2-3.2-3.5-3.5 2.3-.3 3.2-1.2 3.5-3.5z" opacity=".55"/></svg>';
 const CAM = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.7l1.3-2h5l1.3 2h1.7A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.5" r="3.4"/></svg>';
+const SCAN = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8" stroke-width="1.5"/></svg>';
+const TRASH = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9.5 7V5h5v2"/><path d="M6.5 7l1 12a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2l1-12"/></svg>';
 const MIC = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/></svg>';
 
 // ---------- state ----------
@@ -87,9 +90,8 @@ function makeRow(e) {
     <div class="l">
       <textarea class="txt" rows="1" spellcheck="false" autocomplete="off" autocapitalize="off" enterkeyhint="done"></textarea>
       <div class="sub"><i class="dot"></i><span></span></div>
-      <button class="mic" type="button">${MIC}</button>
-      <button class="cam" type="button">${CAM}</button>
-      <button class="x" type="button" tabindex="-1"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="tools"><button class="tool scan" type="button">${SCAN}</button><button class="tool cam" type="button">${CAM}</button><button class="tool mic" type="button">${MIC}</button></div>
+      <button class="x" type="button" tabindex="-1">${TRASH}</button>
     </div>
     <button class="r" type="button" tabindex="-1">
       <span class="kcal"><b>0</b><small>kcal</small></span>
@@ -100,9 +102,11 @@ function makeRow(e) {
   const ta = row.querySelector('.txt');
   ta.value = e ? e.text : '';
   ta.placeholder = e ? '' : t(view === 'tomorrow' ? 'placeholderTomorrow' : view === 'yesterday' ? 'placeholderYesterday' : 'placeholder');
-  row.querySelector('.mic').title = t('dictate');
+  row.querySelector('.mic').title = t('dictate'); row.querySelector('.mic').setAttribute('aria-label', t('dictate'));
   const cam = row.querySelector('.cam'); cam.title = t('takePhoto'); cam.setAttribute('aria-label', t('takePhoto'));
   cam.addEventListener('click', () => pickPhoto());
+  const scan = row.querySelector('.scan'); scan.title = t('scanTitle'); scan.setAttribute('aria-label', t('scanTitle'));
+  scan.addEventListener('click', () => openScanner(addProduct));
   row.classList.toggle('no-cam', state.settings.photos === false);
 
   ta.addEventListener('input', () => {
@@ -374,6 +378,16 @@ async function estimatePhoto(e, data) {
   save();
   if (row) { paint(row, true); if (live.items.length) { row.classList.remove('landed'); void row.offsetWidth; row.classList.add('landed'); } }
   refreshAll(); paintDetail(true);
+}
+
+// ---------- a product from its barcode ----------
+function addProduct(p) {
+  pushUndo();
+  const e = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text: p.name, ts: Date.now(), status: 'done', items: [p.item], mult: 1, barcode: p.code };
+  if (view === 'tomorrow') e.planned = true;
+  list(curKey()).push(e);
+  save(); renderLog(); refreshAll(); sfx('land');
+  const row = rows.get(e.id); if (row) { row.classList.add('landed', 'arrived'); setTimeout(() => row.classList.remove('arrived'), 1400); }
 }
 
 // ---------- dictation ----------

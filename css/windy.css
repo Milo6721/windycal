@@ -838,3 +838,97 @@ body.swipe-lock, body.swipe-lock * { user-select: none !important; -webkit-user-
   .b-right { gap: 12px; }
   .b-kcal .big { font-size: 17px; }
 }
+
+/* ---------- the empty line's tools: barcode, camera, mic — clearly buttons ---------- */
+.tools { position: absolute; z-index: 3; right: 0; top: -5px; display: none; gap: 6px; }
+.row.draft .tools { display: flex; }
+.row.draft.no-cam .cam { display: none; }
+.tool, .row .mic, .row .cam { position: static; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; padding: 0; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--green) 22%, transparent); background: color-mix(in srgb, var(--green) 9%, var(--bg)); color: var(--green);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .05); transition: transform .3s var(--spring-soft), background .2s, box-shadow .25s, border-color .2s; -webkit-tap-highlight-color: transparent; }
+.tool:hover { transform: translateY(-1px); background: color-mix(in srgb, var(--green) 16%, var(--bg)); border-color: color-mix(in srgb, var(--green) 40%, transparent); box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--green) 45%, transparent); }
+.tool:active { transform: scale(.9); }
+.row .mic.listening { color: #fff; background: var(--green); border-color: var(--green); animation: micpulse 1.2s ease-in-out infinite; }
+.row.draft .txt { padding-right: 122px; }
+.row.draft.no-cam .txt { padding-right: 82px; }
+@media (max-width: 420px) { .tool { width: 31px; height: 31px; } .tools { gap: 4px; } .row.draft .txt { padding-right: 106px; } .row.draft.no-cam .txt { padding-right: 70px; } }
+
+/* hover-delete on a computer: the same round button, with a bin, soft red on hover */
+.x { width: 28px; height: 28px; left: -40px; top: 2px; border: 1px solid rgba(213, 88, 79, .2); background: rgba(213, 88, 79, .07); color: #D5584F; }
+.x:hover { background: rgba(213, 88, 79, .16); border-color: rgba(213, 88, 79, .4); color: #C7443B; }
+@media (hover: none) { .x { display: none !important; } } /* on phones you swipe instead */
+
+/* swipe: just the bin */
+.swipe-bg { padding-right: 22px; }
+.swipe-bg span { gap: 0; }
+
+/* ---------- barcode scanner ---------- */
+.scanner { position: fixed; inset: 0; z-index: 85; display: flex; align-items: center; justify-content: center; background: rgba(20, 16, 8, .3); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  opacity: 0; pointer-events: none; transition: opacity .25s; }
+.scanner.open { opacity: 1; pointer-events: auto; }
+.sc-card { width: min(420px, calc(100vw - 24px)); background: var(--card); border-radius: 26px; padding: 18px; box-shadow: 0 30px 80px -20px rgba(0, 0, 0, .4); transform: translateY(16px) scale(.96); transition: transform .5s var(--spring); }
+:root[data-mode="dark"] .sc-card { background: #232220; }
+.scanner.open .sc-card { transform: none; }
+.sc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.sc-head b { font: 600 20px/1.1 var(--serif); }
+.sc-x { width: 30px; height: 30px; border-radius: 50%; border: 0; background: rgba(127, 127, 127, .12); color: var(--soft); display: grid; place-items: center; cursor: pointer; }
+.sc-view { position: relative; aspect-ratio: 4 / 3; border-radius: 18px; overflow: hidden; background: #111; }
+.sc-view video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sc-frame { position: absolute; inset: 26% 14%; border-radius: 14px; box-shadow: 0 0 0 999px rgba(0, 0, 0, .35); border: 2px solid rgba(255, 255, 255, .9); }
+.sc-line { position: absolute; left: 16%; right: 16%; top: 50%; height: 2px; background: var(--green); box-shadow: 0 0 12px var(--green); animation: scanline 1.6s ease-in-out infinite alternate; }
+@keyframes scanline { from { transform: translateY(-34px); } to { transform: translateY(34px); } }
+.sc-msg { position: absolute; left: 0; right: 0; bottom: 10px; margin: 0; text-align: center; font-size: 12.5px; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .6); padding: 0 16px; }
+.scanner.no-cam .sc-view { aspect-ratio: auto; min-height: 110px; background: var(--chip); }
+.scanner.no-cam .sc-frame, .scanner.no-cam .sc-line, .scanner.no-cam video { display: none; }
+.scanner.no-cam .sc-msg { position: static; color: var(--soft); text-shadow: none; padding: 34px 20px; }
+.sc-type { display: flex; gap: 8px; margin-top: 12px; }
+.sc-type input { flex: 1; min-width: 0; border: 0; border-radius: 12px; padding: 11px 12px; font: 600 15px/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .05em; color: var(--ink); background: var(--chip); outline: 0; }
+.sc-type input:focus { box-shadow: inset 0 0 0 1.5px var(--green); }
+.sc-type button { border: 0; border-radius: 12px; padding: 0 16px; background: var(--green); color: #fff; font: 600 13.5px/1 var(--ui); cursor: pointer; }
+.sc-res { margin: 12px 2px 0; font-size: 13.5px; }
+.sc-res.wait { color: var(--soft); } .sc-res.ok { color: var(--green); font-weight: 600; } .sc-res.bad { color: #D5584F; }
+
+/* ---------- Weekly, second version: coach on top, a ring of macros per day ---------- */
+.weekly .coach { margin: 0 0 22px; }
+.cal-d { min-height: 0; align-items: center; gap: 10px; padding: 12px 8px 12px; }
+.cal-h { align-self: stretch; }
+.cal-ring { position: relative; display: grid; place-items: center; width: 74px; height: 74px; flex-direction: initial; }
+.donut { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.donut circle { fill: none; stroke-width: 3.6; stroke-linecap: round; transition: stroke-dasharray .9s var(--spring); }
+.donut .dn-bg { stroke: rgba(127, 127, 127, .14); }
+.donut .dn-protein { stroke: var(--protein); } .donut .dn-carbs { stroke: var(--carbs); } .donut .dn-fat { stroke: var(--fat); }
+.cal-d.over .donut .dn-bg { stroke: color-mix(in srgb, var(--over) 35%, transparent); }
+.cal-k { position: relative; display: flex; flex-direction: column; align-items: center; line-height: 1; }
+.cal-k b { font: 650 15px/1 var(--ui); font-variant-numeric: tabular-nums; }
+.cal-k i { font-style: normal; font-size: 9.5px; color: var(--soft); margin-top: 2px; }
+.cal-m { display: flex; flex-direction: column; gap: 3px; align-self: stretch; padding: 0 4px; }
+.cal-m span { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--ink); }
+.cal-m i { width: 7px; height: 7px; border-radius: 50%; background: var(--mc); flex: none; }
+.cal-d.none .cal-m { opacity: .35; }
+.cal-w { margin-top: 2px; align-self: stretch; justify-content: center; gap: 6px; padding: 6px 4px 0; border-top: 1px solid rgba(127, 127, 127, .12); font-size: 12px; color: var(--ink); }
+.cal-w .glass { width: 20px; height: 25px; }
+.cal-w.dry { color: var(--soft); }
+.cal-w.dry .glass { opacity: .6; }
+.cal-foods { display: none !important; }
+
+/* the chosen day: a green summary, then the meals by time of day */
+.weekly .wk-note { margin: 10px 0 6px; padding: 12px 14px; border-radius: 16px; background: var(--green-soft); font: 400 14.5px/1.5 var(--serif); color: var(--green); }
+:root[data-mode="dark"] .weekly .wk-note { color: #8FD6B4; }
+.weekly .wk-note.thinking { background: var(--green-soft); -webkit-background-clip: border-box; background-clip: border-box; color: var(--green); font: 600 12.5px/1.5 var(--ui); animation: notepulse 1.4s ease-in-out infinite; }
+@keyframes notepulse { 50% { opacity: .55; } }
+.wk-div { display: flex; justify-content: space-between; align-items: baseline; padding: 16px 0 4px; }
+.wk-div em { font-style: normal; letter-spacing: 0; text-transform: none; font-weight: 500; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 760px) {
+  .cal-d { padding: 8px 2px 9px; gap: 6px; }
+  .cal-ring { width: 42px; height: 42px; }
+  .cal-k b { font-size: 10px; } .cal-k i { display: none; }
+  .cal-m { display: none; }
+  .cal-w { flex-direction: column; gap: 2px; padding-top: 5px; font-size: 9.5px; }
+  .cal-w .glass { width: 15px; height: 19px; }
+}
+.cal-ring svg.donut { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.cal-ring .donut circle { fill: none; stroke-width: 3.6; }
+.cal-ring { display: grid; gap: 0; }
+@media (max-width: 760px) { .cal-ring { display: grid; } }
+@media (max-width: 760px) { .cal-d .cal-w { display: flex; } .cal-ring { width: 44px; height: 44px; } }

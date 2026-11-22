@@ -1,20 +1,20 @@
 // Swipe a line to the left to delete it: the line follows your finger (or mouse), a soft red
 // layer with a bin opens up behind it, and past a point the bin pops to say "let go and it's gone".
 // Let go there (or flick quickly) and the line slides away; anywhere else it springs back.
-const BIN = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9.5 7V5h5v2"/><path d="M6.5 7l1 12a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2l1-12"/><path d="M10 11v6M14 11v6"/></svg>';
+const BIN = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9.5 7V5h5v2"/><path d="M6.5 7l1 12a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2l1-12"/><path d="M10 11v6M14 11v6"/></svg>';
 
 export function enableSwipe(container, selector, onDelete, label) {
   let s = null, justSwiped = 0;
   const bgOf = row => {
     let bg = row.querySelector(':scope > .swipe-bg');
-    if (!bg) { bg = document.createElement('div'); bg.className = 'swipe-bg'; bg.innerHTML = `<span>${BIN}<b></b></span>`; row.prepend(bg); }
-    bg.querySelector('b').textContent = label();
+    if (!bg) { bg = document.createElement('div'); bg.className = 'swipe-bg'; bg.innerHTML = `<span>${BIN}</span>`; row.prepend(bg); }
+    bg.setAttribute('aria-label', label());
     return bg;
   };
   container.addEventListener('pointerdown', ev => {
     if (ev.pointerType === 'mouse' && ev.button !== 0) return;
     const row = ev.target.closest(selector);
-    if (!row || !container.contains(row) || ev.target.closest('.mic, .x, input[type=range]')) return;
+    if (!row || !container.contains(row) || ev.target.closest('.tool, .x, input[type=range]')) return;
     s = { row, id: ev.pointerId, x0: ev.clientX, y0: ev.clientY, dx: 0, on: false, t: [] };
   });
   container.addEventListener('pointermove', ev => {

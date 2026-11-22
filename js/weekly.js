@@ -19,10 +19,10 @@ const keep = () => {
   try { localStorage.setItem(AI_KEY, JSON.stringify(cache)); } catch {}
 };
 
-// The week starts on Sunday in English and on Monday in Polish, like the calendars people use.
+// The week runs Monday to Sunday.
 function weekDays(off) {
   const now = new Date(); now.setHours(12, 0, 0, 0);
-  const start = new Date(now), first = getLang() === 'pl' ? 1 : 0;
+  const start = new Date(now), first = 1;
   start.setDate(now.getDate() - ((now.getDay() - first + 7) % 7) + off * 7);
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(start); d.setDate(start.getDate() + i);
@@ -45,11 +45,28 @@ export function renderWeekly(el) {
   const T = targets(state.settings), days = weekDays(weekOff), today = new Date();
   if (!sel || !days.some(x => x.key === sel)) sel = (days.find(x => sameDay(x.d, today)) || days.find(x => x.entries.length) || days[0]).key;
   const past = days.filter(x => x.d <= today || sameDay(x.d, today)); // planned days ahead don't count yet
-  const logged = past.filter(x => x.tot.kcal > 0), n = logged.length || 1;
-  const avg = k => logged.reduce((s, x) => s + x.tot[k], 0) / n;
-  const C = 2 * Math.PI * 9;
+
+  // a ring for each day: how far toward the goal, split into protein, carbs and fat by their calories
+  const R = 15, C = 2 * Math.PI * R;
+  const donut = x => {
+    const kc = [x.tot.protein * 4, x.tot.carbs * 4, x.tot.fat * 9], sum = kc.reduce((a, b) => a + b, 0);
+    const span = C * Math.min(x.tot.kcal / T.kcal, 1);
+    let at = 0;
+    const arcs = sum ? kc.map((v, i) => {
+      const len = Math.max(0, (v / sum) * span - (span < C ? 0 : 1.6) - 1.4);
+      const a = `<circle class="dn-${MACROS[i]}" cx="18" cy="18" r="${R}" stroke-dasharray="${len.toFixed(2)} ${C}" stroke-dashoffset="${(-at).toFixed(2)}"/>`;
+      at += (v / sum) * span; return len > .5 ? a : '';
+    }).join('') : '';
+    return `<svg class="donut" viewBox="0 0 36 36"><circle class="dn-bg" cx="18" cy="18" r="${R}"/>${arcs}</svg>`;
+  };
+  const litres = n => n * 250 >= 1000 ? (n * 0.25).toLocaleString(locale(), { maximumFractionDigits: 2 }) + ' l' : n * 250 + ' ml';
 
   el.innerHTML = `
+    <div class="coach" id="coach">
+      <div class="coach-h"><span class="coach-ic">${SPARK}</span><b>${t('coachTitle')}</b><button type="button" class="coach-re" aria-label="${t('tryAgain')}" title="${t('tryAgain')}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg></button></div>
+      <p class="coach-t"></p>
+    </div>
+
     <div class="wk-nav">
       <button type="button" class="wk-arrow" data-go="-1" aria-label="${t('prevWeek')}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
       <div class="wk-range"><b>${rangeLabel(days)}</b><span>${weekOff === 0 ? t('thisWeekShort') : weekOff === -1 ? t('lastWeek') : days[0].d.getFullYear()}</span></div>
@@ -57,25 +74,14 @@ export function renderWeekly(el) {
       ${weekOff !== 0 ? `<button type="button" class="wk-now" data-go="now">${t('thisWeekShort')}</button>` : ''}
     </div>
     <div class="cal">${days.map((x, i) => {
-      const isToday = sameDay(x.d, today), future = x.d > today && !isToday, f = Math.min(x.tot.kcal / T.kcal, 1), over = x.tot.kcal > T.kcal;
-      return `<button type="button" class="cal-d ${isToday ? 'today' : ''} ${future ? 'future' : ''} ${x.key === sel ? 'sel' : ''} ${over ? 'over' : ''}" data-k="${x.key}" style="--i:${i}">
+      const isToday = sameDay(x.d, today), future = x.d > today && !isToday, over = x.tot.kcal > T.kcal;
+      return `<button type="button" class="cal-d ${isToday ? 'today' : ''} ${future ? 'future' : ''} ${x.key === sel ? 'sel' : ''} ${over ? 'over' : ''} ${x.tot.kcal ? '' : 'none'}" data-k="${x.key}" style="--i:${i}">
         <span class="cal-h"><span class="cal-wd">${x.d.toLocaleDateString(locale(), { weekday: 'short' })}</span><span class="cal-n">${x.d.getDate()}</span></span>
-        <span class="cal-ring"><svg viewBox="0 0 22 22"><circle class="ring-bg" cx="11" cy="11" r="9"/><circle class="ring-fg" cx="11" cy="11" r="9" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - f)}"/></svg><b>${x.tot.kcal ? num(x.tot.kcal) : '–'}</b></span>
-        <span class="cal-foods">${x.entries.slice(0, 4).map(e => `<span><i>${esc(e.text)}</i><em>${e.items?.length ? num(totalsOf([e]).kcal) : ''}</em></span>`).join('')}${x.entries.length > 4 ? `<span class="more">${t('more', x.entries.length - 4)}</span>` : ''}</span>
-        ${waterOn() && x.water ? `<span class="cal-w">${glassSVG(Math.min(x.water / waterGoal(), 1))}${x.water * 250 >= 1000 ? (x.water * 0.25).toLocaleString(locale(), { maximumFractionDigits: 2 }) + ' l' : x.water * 250 + ' ml'}</span>` : ''}
+        <span class="cal-ring">${donut(x)}<span class="cal-k"><b>${x.tot.kcal ? num(x.tot.kcal) : '–'}</b>${x.tot.kcal ? '<i>kcal</i>' : ''}</span></span>
+        <span class="cal-m">${MACROS.map(k => `<span class="m-${k}"><i></i>${x.tot[k]} g</span>`).join('')}</span>
+        ${waterOn() ? `<span class="cal-w ${x.water ? '' : 'dry'}">${glassSVG(Math.min(x.water / waterGoal(), 1))}<span>${x.water ? litres(x.water) : '–'}</span></span>` : ''}
       </button>`;
     }).join('')}</div>
-
-    ${logged.length ? `<div class="wk-avg">
-      <div><b>${num(avg('kcal'))}</b><span>${t('avgKcal')}</span></div>
-      ${MACROS.map(k => `<div class="m-${k}"><b>${icon(k, 14)}${num(avg(k))} g</b><span>${t(k)}</span></div>`).join('')}
-      <div><b>${logged.length}/${past.length}</b><span>${t('sLogged')}</span></div>
-    </div>` : ''}
-
-    <div class="coach" id="coach">
-      <div class="coach-h"><span class="coach-ic">${SPARK}</span><b>${t('coachTitle')}</b><button type="button" class="coach-re" aria-label="${t('tryAgain')}" title="${t('tryAgain')}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg></button></div>
-      <p class="coach-t"></p>
-    </div>
 
     <div class="wk-day" id="wkday"></div>`;
 
@@ -97,11 +103,19 @@ function pickDay(x, T, animate) {
   box.innerHTML = `<h3>${longDate(x.d)}<span>${x.tot.kcal > 0 ? `${num(x.tot.kcal)} / ${num(T.kcal)} kcal` : ''}</span></h3>
     <p class="wk-note" hidden></p>`;
   if (!x.entries.length) box.insertAdjacentHTML('beforeend', `<p class="wk-empty">${t('noEntries')}</p>`);
-  for (const e of x.entries) {
-    const row = document.createElement('div'); row.className = 'wk-item'; row.dataset.id = e.id;
-    const a = document.createElement('span'), b = document.createElement('span');
-    a.textContent = e.text; b.textContent = e.items?.length ? `${num(totalsOf([e]).kcal)} kcal` : '';
-    row.append(a, b); box.append(row);
+  // grouped like Today: planned first, then morning, afternoon, evening
+  const when = e => { if (e.planned) return 'plannedGroup'; const h = new Date(e.ts).getHours(); return h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening'; };
+  const order = ['plannedGroup', 'morning', 'afternoon', 'evening'];
+  for (const g of order) {
+    const group = x.entries.filter(e => when(e) === g); if (!group.length) continue;
+    const kc = group.reduce((s, e) => s + totalsOf([e]).kcal, 0);
+    box.insertAdjacentHTML('beforeend', `<div class="divider wk-div"><span>${t(g)}</span><em>${num(kc)} kcal</em></div>`);
+    for (const e of group) {
+      const row = document.createElement('div'); row.className = 'wk-item'; row.dataset.id = e.id;
+      const a = document.createElement('span'), b = document.createElement('span');
+      a.textContent = e.text; b.textContent = e.items?.length ? `${num(totalsOf([e]).kcal)} kcal` : '';
+      row.append(a, b); box.append(row);
+    }
   }
   if (animate) { box.classList.remove('swap'); void box.offsetWidth; box.classList.add('swap'); }
   askNote(x, T);
@@ -159,6 +173,15 @@ function askCoach(days, T, force) {
   }, force ? 0 : 900);
 }
 
+// Windy's own short read of one day, when the AI is not available.
+function ownNote(x, T) {
+  const pl = getLang() === 'pl', k = x.tot.kcal, pct = Math.round((k / T.kcal) * 100), p = x.tot.protein;
+  const top = x.entries.slice().sort((a, b) => totalsOf([b]).kcal - totalsOf([a]).kcal)[0];
+  const tip = p < T.protein * 0.7 ? (pl ? ` Białka ${p} z ${T.protein} g, więc na podobny dzień dodaj coś białkowego.` : ` Protein was ${p} of ${T.protein} g, so add something protein-rich on a day like this.`)
+    : k > T.kcal * 1.1 ? (pl ? ' Trochę ponad cel; lżejsza kolacja to wyrówna.' : ' A bit over the goal; a lighter dinner evens it out.') : (pl ? ' Dobrze zbilansowany dzień.' : ' A well-balanced day.');
+  return pl ? `${num(k)} kcal, ${pct}% celu. Najwięcej dało: ${top.text}.${tip}` : `${num(k)} kcal, ${pct}% of your goal. The biggest part was ${top.text}.${tip}`;
+}
+
 function askNote(x, T) {
   const p = root.querySelector('.wk-note'); if (!p || !x.entries.length) return;
   const payload = payloadOf([x], T), key = 'n:' + JSON.stringify(payload);
@@ -169,6 +192,6 @@ function askNote(x, T) {
     const text = await ask('note', payload);
     if (!p.isConnected) return;
     p.classList.remove('thinking');
-    if (text) { cache[key] = { text, at: Date.now() }; keep(); show(p, text, true); } else p.hidden = true;
+    if (text) { cache[key] = { text, at: Date.now() }; keep(); show(p, text, true); } else show(p, ownNote(x, T), false);
   }, 400);
 }
