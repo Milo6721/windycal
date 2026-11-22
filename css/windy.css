@@ -932,3 +932,60 @@ body.swipe-lock, body.swipe-lock * { user-select: none !important; -webkit-user-
 .cal-ring { display: grid; gap: 0; }
 @media (max-width: 760px) { .cal-ring { display: grid; } }
 @media (max-width: 760px) { .cal-d .cal-w { display: flex; } .cal-ring { width: 44px; height: 44px; } }
+
+/* =====================  Sunday evening patch  ===================== */
+/* 1. Clean lines: the food's name on the left, its calories on the right. Nothing else. */
+.log .row .sub, .log .r .macs, .log .sub .thumb { display: none !important; }
+.log .row { padding: 9px 0; align-items: center; }
+.log .r .kcal { font-size: 17px; }
+
+/* 2. Calm estimating: a soft grey shimmer over the name, a quiet "Estimating…", no waves or wobble */
+.l::before, .l::after, .row.thinking .l::before, .row.thinking .l::after, .row.landed .l::before, .row.arrived .l::before, .row.picked .l::before { display: none !important; animation: none !important; }
+.row.thinking .txt {
+  background: linear-gradient(90deg, var(--ink) 0%, var(--ink) 38%, var(--faint) 50%, var(--ink) 62%, var(--ink) 100%) !important; background-size: 250% 100% !important;
+  -webkit-background-clip: text !important; background-clip: text !important; -webkit-text-fill-color: transparent !important; animation: calmshine 1.6s ease-in-out infinite !important; }
+@keyframes calmshine { from { background-position: 100% 0; } to { background-position: -50% 0; } }
+.row.thinking .state { background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important; color: var(--soft) !important; animation: none !important; }
+.row.thinking .state svg { display: none; }
+.row.landed .r, .row.arrived .r { animation: calmin .45s cubic-bezier(.2, .8, .2, 1) both !important; }
+@keyframes calmin { from { opacity: 0; transform: translateX(6px); } }
+.caret.gust i, .caret.gust svg, .caret.gust svg path { animation: none !important; }
+.caret svg { display: none; }
+.water.splash .glass { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { .row.thinking .txt { animation: none !important; -webkit-text-fill-color: var(--soft) !important; } }
+
+/* 4. one camera button, two choices */
+.row.draft .txt { padding-right: 84px; }
+.row.draft.no-cam .txt { padding-right: 46px; }
+.cam-menu { position: fixed; z-index: 76; min-width: 200px; padding: 6px; border-radius: 16px; background: var(--card); box-shadow: 0 12px 36px -8px rgba(20, 16, 8, .28), 0 0 0 .5px rgba(0, 0, 0, .07);
+  opacity: 0; transform: translateY(6px) scale(.97); transform-origin: bottom right; pointer-events: none; transition: opacity .15s, transform .3s var(--spring-soft); }
+:root[data-mode="dark"] .cam-menu { background: #2A2826; box-shadow: 0 12px 36px -8px rgba(0, 0, 0, .6), 0 0 0 .5px rgba(255, 255, 255, .08); }
+.cam-menu.open { opacity: 1; transform: none; pointer-events: auto; }
+.cam-menu button { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; border-radius: 10px; padding: 11px 12px; font: 500 14px/1.2 var(--ui); color: var(--ink); cursor: pointer; text-align: left; }
+.cam-menu button svg { color: var(--green); flex: none; }
+.cam-menu button:hover, .cam-menu button:focus-visible { background: rgba(127, 127, 127, .1); outline: 0; }
+
+/* 8. the summary bar: nothing overlaps, on any phone */
+.ring-wrap { position: relative; flex: none; display: grid; place-items: center; }
+.ring-in { display: none; }
+@media (max-width: 480px) {
+  .bar { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 10px; padding: 10px 14px 12px 10px; }
+  main { padding-bottom: 230px; }
+  .b-left { gap: 10px; min-width: 0; }
+  .ring-wrap .ring { width: 56px; height: 56px; }
+  .ring-in { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; pointer-events: none; }
+  .ring-in b { font: 700 13px/1 var(--ui); font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .ring-in i { font-style: normal; font-size: 9px; color: var(--soft); margin-top: 2px; }
+  .bar.over .ring-in i { color: var(--over); }
+  .b-kcal { min-width: 0; }
+  .b-kcal .big { font-size: clamp(14px, 4.3vw, 17px) !important; overflow: hidden; text-overflow: ellipsis; }
+  .b-kcal .small { display: none; }  /* what's left now sits in the ring */
+  .water { grid-column: auto; margin: 0 !important; }
+  .water b { display: none; }
+  .b-right { grid-column: 1 / -1; justify-content: space-between; gap: 8px !important; padding-top: 8px; border-top: 1px solid rgba(127, 127, 127, .12); }
+  .mac { flex: 1; min-width: 0; flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 5px; }
+  .mac b { font-size: 14px !important; order: 2; }
+  .mac .lbl { order: 1; } .mac .lbl span { display: inline !important; font-size: 11px; }
+  .mac em { order: 3; flex-basis: 100%; margin-top: 4px; }
+}
+@media (max-width: 380px) { .mac .lbl span { display: none !important; } }

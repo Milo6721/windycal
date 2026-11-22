@@ -48,16 +48,26 @@ function tone(freq, at, dur, gain) {
   g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(gain, at + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
   o.connect(g).connect(ctx.destination); o.start(at); o.stop(at + dur + 0.02);
 }
+// Few sounds, all soft: a quiet wooden "tok" when a food lands, a short pour for water.
+// Everything else is silent (a tiny vibration on phones that support it).
+function pour(at) {
+  const len = 0.55, buf = ctx.createBuffer(1, ctx.sampleRate * len, ctx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (0.6 + 0.4 * Math.sin(i / 90));
+  const src = ctx.createBufferSource(); src.buffer = buf;
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 7;
+  bp.frequency.setValueAtTime(500, at); bp.frequency.exponentialRampToValueAtTime(1500, at + len); // the glass fills up: the pitch rises
+  const g = ctx.createGain(); g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(0.11, at + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, at + len);
+  src.connect(bp).connect(g).connect(ctx.destination); src.start(at); src.stop(at + len);
+}
 export function sfx(name) {
+  if (name === 'pop' || name === 'off') { navigator.vibrate?.(6); return; }
   if (!soundOn) return;
   try {
     ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
     if (ctx.state === 'suspended') ctx.resume();
     const t = ctx.currentTime + 0.01;
-    if (name === 'land') { tone(784, t, 0.22, 0.045); tone(1175, t + 0.07, 0.32, 0.035); }
-    else if (name === 'pop') tone(620, t, 0.12, 0.04);
-    else if (name === 'drop') { tone(980, t, 0.09, 0.035); tone(1320, t + 0.05, 0.14, 0.03); }
-    else if (name === 'off') tone(330, t, 0.16, 0.035);
+    if (name === 'land') { tone(523, t, 0.16, 0.022); navigator.vibrate?.(8); }
+    else if (name === 'drop') { pour(t); navigator.vibrate?.(10); }
   } catch {}
 }
 

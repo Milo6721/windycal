@@ -90,7 +90,7 @@ function makeRow(e) {
     <div class="l">
       <textarea class="txt" rows="1" spellcheck="false" autocomplete="off" autocapitalize="off" enterkeyhint="done"></textarea>
       <div class="sub"><i class="dot"></i><span></span></div>
-      <div class="tools"><button class="tool scan" type="button">${SCAN}</button><button class="tool cam" type="button">${CAM}</button><button class="tool mic" type="button">${MIC}</button></div>
+      <div class="tools"><button class="tool cam" type="button" aria-haspopup="menu">${CAM}</button><button class="tool mic" type="button">${MIC}</button></div>
       <button class="x" type="button" tabindex="-1">${TRASH}</button>
     </div>
     <button class="r" type="button" tabindex="-1">
@@ -104,9 +104,8 @@ function makeRow(e) {
   ta.placeholder = e ? '' : t(view === 'tomorrow' ? 'placeholderTomorrow' : view === 'yesterday' ? 'placeholderYesterday' : 'placeholder');
   row.querySelector('.mic').title = t('dictate'); row.querySelector('.mic').setAttribute('aria-label', t('dictate'));
   const cam = row.querySelector('.cam'); cam.title = t('takePhoto'); cam.setAttribute('aria-label', t('takePhoto'));
-  cam.addEventListener('click', () => pickPhoto());
-  const scan = row.querySelector('.scan'); scan.title = t('scanTitle'); scan.setAttribute('aria-label', t('scanTitle'));
-  scan.addEventListener('click', () => openScanner(addProduct));
+  cam.title = t('camTitle'); cam.setAttribute('aria-label', t('camTitle'));
+  cam.addEventListener('click', ev => { ev.stopPropagation(); camMenu(cam); });
   row.classList.toggle('no-cam', state.settings.photos === false);
 
   ta.addEventListener('input', () => {
@@ -380,6 +379,23 @@ async function estimatePhoto(e, data) {
   refreshAll(); paintDetail(true);
 }
 
+// ---------- the camera button: a small menu with "Photo of a meal" and "Scan a barcode" ----------
+const cm = document.createElement('div'); cm.className = 'cam-menu'; cm.setAttribute('role', 'menu'); document.body.append(cm);
+function camMenu(btn) {
+  if (cm.classList.contains('open')) return cm.classList.remove('open');
+  cm.innerHTML = `<button type="button" role="menuitem" data-c="photo">${CAM}<span>${t('takePhoto')}</span></button><button type="button" role="menuitem" data-c="scan">${SCAN}<span>${t('scanTitle')}</span></button>`;
+  const r = btn.getBoundingClientRect();
+  cm.style.right = Math.max(8, innerWidth - r.right) + 'px'; cm.style.bottom = (innerHeight - r.top + 8) + 'px';
+  cm.classList.add('open'); cm.querySelector('button').focus();
+}
+cm.addEventListener('click', ev => { const b = ev.target.closest('button'); if (!b) return; cm.classList.remove('open'); if (b.dataset.c === 'photo') pickPhoto(); else openScanner(addProduct); });
+cm.addEventListener('keydown', ev => {
+  const items = [...cm.querySelectorAll('button')], i = items.indexOf(document.activeElement);
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); items[(i + (ev.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus(); }
+  else if (ev.key === 'Escape') cm.classList.remove('open');
+});
+document.addEventListener('pointerdown', ev => { if (!ev.target.closest('.cam-menu, .cam')) cm.classList.remove('open'); });
+
 // ---------- a product from its barcode ----------
 function addProduct(p) {
   pushUndo();
@@ -450,6 +466,7 @@ export function renderTotals() {
   const over = kcal > T.kcal;
   $('bar').classList.toggle('over', over);
   $('bLeft').textContent = over ? t('over', num(kcal - T.kcal)) : t('left', num(T.kcal - kcal));
+  const ri = $('ringIn'); if (ri) { ri.querySelector('b').textContent = num(Math.abs(T.kcal - kcal)); ri.querySelector('i').textContent = over ? t('ringOver') : t('ringLeft'); }
   const frac = Math.min(kcal / T.kcal, 1);
   instant ? ring.jump(frac) : ring.set(frac);
   for (const el of document.querySelectorAll('.mac')) {
