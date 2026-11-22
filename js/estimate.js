@@ -20,15 +20,21 @@ const clean = it => ({
   confidence: ['high', 'medium', 'low'].includes(it.confidence) ? it.confidence : 'medium',
 });
 
+// After Gemini says its free limit is used up, stay quiet for a while instead of asking again and again.
+const PAUSE_KEY = 'windy.aipause';
+export const aiPausedUntil = () => { try { return +localStorage.getItem(PAUSE_KEY) || 0; } catch { return 0; } };
+export const aiPaused = () => aiPausedUntil() > Date.now();
+export function pauseAI(minutes = 15) { try { localStorage.setItem(PAUSE_KEY, String(Date.now() + minutes * 60000)); } catch {} }
+
 // source: 'cache' | 'ai' (a real answer), 'table' (rough), 'none' (nothing yet, retry later)
 export async function getEstimate(text, lang, fresh = false) {
   const k = norm(text);
   if (!fresh && cache[k]) return { items: cache[k].items, source: 'cache', notFood: !cache[k].items.length };
 
-  let reason = 'offline';
-  if (navigator.onLine !== false) {
+  let reason = navigator.onLine === false ? 'offline' : 'rate_limited';
+  if (navigator.onLine !== false && (fresh || !aiPaused())) {
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), fresh ? 55000 : 25000);
+    const timer = setTimeout(() => ctl.abort(), fresh ? 40000 : 22000);
     try {
       const r = await fetch('/api/estimate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -42,7 +48,7 @@ export async function getEstimate(text, lang, fresh = false) {
           return { items, source: 'ai', notFood: !items.length };
         }
         reason = 'bad_output';
-      } else { const j = await r.json().catch(() => ({})); reason = j.error || 'upstream'; if (j.detail) console.warn('Windy AI:', j.detail); }
+      } else { const j = await r.json().catch(() => ({})); reason = j.error || 'upstream'; if (j.detail) console.warn('Windy AI:', j.detail); if (reason === 'rate_limited') pauseAI(); }
     } catch { reason = 'unreachable'; } finally { clearTimeout(timer); }
   }
 

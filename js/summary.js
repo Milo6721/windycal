@@ -95,6 +95,15 @@ function goPage(i, animate = true) {
   track.style.transform = `translateX(${-page * 100}%)`;
   const sec = track.children[page];
   if (page === 0) renderDay(sec, animate); else renderRange(sec, page === 1 ? 7 : 30, animate);
+  fitUp();
+}
+function fitUp() {
+  if (openKind !== 'up' || !geo) return;
+  const el = panels.up, sec = el.querySelector('.sum-track').children[page];
+  const need = el.querySelector('.sum-top').offsetHeight + sec.scrollHeight + geo.b.height + 14 + 6;
+  const room = innerHeight - geo.bottom - 76;
+  geo.height = Math.min(room, need);
+  el.style.height = geo.height + 'px';
 }
 
 // ---------- left: the AI read ----------
@@ -160,6 +169,15 @@ async function askAI(force = false) {
   } catch {}
   if (run !== aiRun || !panels.ai.isConnected) return;
   if (!text) {
+    const own = localRead(scope, payload);
+    if (own) {
+      out.innerHTML = '';
+      const p = Object.assign(document.createElement('p'), { className: 'ai-text', textContent: own });
+      const note = Object.assign(document.createElement('small'), { className: 'ai-detail', textContent: (why === 'rate_limited' ? t('aiLimit') : t('aiOwn')) + ' ' });
+      const again = Object.assign(document.createElement('button'), { type: 'button', className: 'ai-again', textContent: t('tryAgain') });
+      again.onclick = () => askAI(true); note.append(again); p.append(note); out.append(p);
+      return;
+    }
     const msg = why === 'not_deployed' ? t('aiDeploy') : ['no_key', 'bad_key', 'rate_limited'].includes(why) ? t('why_' + why) : t('aiFail');
     out.innerHTML = '';
     const p = Object.assign(document.createElement('p'), { className: 's-ai-hint', textContent: msg + ' ' });
@@ -173,31 +191,43 @@ async function askAI(force = false) {
   sfx('land'); showText(text, true);
 }
 
+// A short written read made from the numbers alone, for when Gemini is resting.
+function localRead(scope, payload) {
+  const g = payload.goal, d = payload.days; if (!d.length) return '';
+  const n = d.length, sum = k => d.reduce((s, x) => s + x[k], 0), avg = k => sum(k) / n;
+  const pl = getLang() === 'pl';
+  if (scope === 'day') {
+    const k = Math.round(sum('kcal')), pct = Math.round((k / g.kcal) * 100), p = Math.round(sum('protein'));
+    const top = d[0].foods.slice().sort((a, b) => (+(b.match(/\((\d+)/) || [])[1] || 0) - (+(a.match(/\((\d+)/) || [])[1] || 0))[0];
+    const proteinNote = p >= g.protein * 0.8 ? (pl ? 'Białka masz dobrze.' : 'Protein is on track.') : (pl ? `Białka jest ${p} z ${g.protein} g, więc przy kolejnym posiłku warto dorzucić coś białkowego.` : `Protein is at ${p} of ${g.protein} g, so your next meal is a good place for something protein-rich.`);
+    return pl
+      ? `Dziś masz ${num(k)} z ${num(g.kcal)} kcal (${pct}%). ${proteinNote}${top ? ` Najwięcej dało: ${top.replace(/\s*\(.*\)$/, '')}.` : ''}`
+      : `So far today you are at ${num(k)} of ${num(g.kcal)} kcal (${pct}%). ${proteinNote}${top ? ` The biggest part came from ${top.replace(/\s*\(.*\)$/, '')}.` : ''}`;
+  }
+  const a = Math.round(avg('kcal')), diff = a - g.kcal, p = Math.round(avg('protein'));
+  const near = d.filter(x => x.kcal >= g.kcal * 0.8 && x.kcal <= g.kcal * 1.05).length;
+  return pl
+    ? `W ${n} zapisanych dniach średnio ${num(a)} kcal, czyli ${diff >= 0 ? `${num(diff)} ponad` : `${num(-diff)} poniżej`} celu. Białko średnio ${p} z ${g.protein} g. Blisko celu byłeś w ${near} z ${n} dni.`
+    : `Over ${n} logged ${n === 1 ? 'day' : 'days'} you averaged ${num(a)} kcal, ${diff >= 0 ? `${num(diff)} above` : `${num(-diff)} below`} your goal. Protein averaged ${p} of ${g.protein} g, and ${near} of ${n} days landed near your goal.`;
+}
+
 // ---------- right: trends ----------
 function renderTrend(animate) {
   const el = panels.trend.querySelector('.pan-c');
-  const T = targets(state.settings), days = lastDays(30), week = days.slice(-7);
-  const logged = days.filter(x => x.tot.kcal > 0), wl = week.filter(x => x.tot.kcal > 0);
-  const avg = (arr, k) => arr.length ? arr.reduce((s, x) => s + x.tot[k], 0) / arr.length : 0;
-  let streak = 0;
-  for (let i = days.length - 1; i >= 0; i--) { if (days[i].tot.kcal > 0) streak++; else if (i < days.length - 1) break; }
-  // a soft area chart of the last 30 days, with the goal as a dashed line
-  const W = 600, H = 60, max = Math.max(T.kcal * 1.25, ...days.map(x => x.tot.kcal));
-  const pts = days.map((x, i) => [(i / (days.length - 1)) * W, H - (x.tot.kcal / max) * (H - 6) - 3]);
-  let d = `M${pts[0][0]},${pts[0][1]}`;
-  for (let i = 1; i < pts.length; i++) { const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], cx = (x0 + x1) / 2; d += ` C${cx},${y0} ${cx},${y1} ${x1},${y1}`; }
-  const gy = H - (T.kcal / max) * (H - 6) - 3;
+  const T = targets(state.settings), days = lastDays(7), logged = days.filter(x => x.tot.kcal > 0);
+  const avg = logged.length ? logged.reduce((s, x) => s + x.tot.kcal, 0) / logged.length : 0;
+  const near = logged.filter(x => x.tot.kcal >= T.kcal * 0.8 && x.tot.kcal <= T.kcal * 1.05).length;
+  const max = Math.max(T.kcal * 1.15, ...days.map(x => x.tot.kcal));
   el.innerHTML = `
-    <div class="st-l"><div class="st-title">${t('trendTitle')}</div><span class="st-sub">${t('last30')} · ${t('goalWord')} ${num(T.kcal)}</span></div>
-    <svg class="tr-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
-      <defs><linearGradient id="trg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--green)" stop-opacity=".32"/><stop offset="1" stop-color="var(--green)" stop-opacity="0"/></linearGradient></defs>
-      <line class="tr-goal" x1="0" x2="${W}" y1="${gy}" y2="${gy}"/>
-      <path class="tr-area" d="${d} L${W},${H} L0,${H} Z"/>
-      <path class="tr-line" pathLength="100" d="${d}"/>
-    </svg>
-    <div class="tr-stats"><div><b><i data-n="${Math.round(avg(wl, 'kcal'))}">0</i></b><span>${t('avg7')}</span></div><div><b><i data-n="${streak}">0</i></b><span>${t('sStreak')}</span></div></div>
-    <div class="tr-macs">${MACROS.map(k => `<div class="m-${k}">${icon(k, 14)}<b><i data-n="${Math.round(avg(wl, k))}">0</i> g</b></div>`).join('')}</div>`;
-  if (!animate) el.querySelector('.tr-line').style.animation = 'none';
+    <div class="st-l"><div class="st-title">${t('trendTitle')}</div><span class="st-sub">${t('thisWeek')} · ${t('goalWord')} ${num(T.kcal)}</span></div>
+    <div class="wk7">
+      <i class="wk7-goal" style="bottom:calc(15px + (100% - 31px) * ${(T.kcal / max).toFixed(3)})"></i>
+      ${days.map((x, i) => `<div class="wk7-d ${x.tot.kcal > T.kcal ? 'over' : ''} ${i === 6 ? 'now' : ''}">
+        <span class="wk7-n">${x.tot.kcal > 0 ? num(x.tot.kcal) : '–'}</span>
+        <span class="wk7-b"><i style="height:${x.tot.kcal > 0 ? Math.max((x.tot.kcal / max) * 100, 6) : 0}%;animation-delay:${i * 40}ms"></i></span>
+        <span class="wk7-l">${i === 6 ? t('today') : x.d.toLocaleDateString(locale(), { weekday: 'short' })}</span></div>`).join('')}
+    </div>
+    <div class="tr-stats"><div><b><i data-n="${Math.round(avg)}">0</i></b><span>${t('avgKcal')}</span></div><div><b>${near}/${logged.length || 0}</b><span>${t('sOnGoal')}</span></div></div>`;
   runCounts(el, !animate);
 }
 
@@ -212,8 +242,8 @@ function measure(kind) {
   const width = Math.min(vw - (vw < 700 ? 12 : 40), 1180), left = (vw - width) / 2;
   return { left, width, bottom, height: b.height, b };
 }
-const dist = () => Math.min(300, innerWidth * 0.45);       // how far a sideways pull opens a strip
-const span = () => geo ? geo.height - geo.b.height : 400; // how far an upward pull opens the sheet
+const dist = () => Math.min(240, innerWidth * 0.4);       // how far a sideways pull opens a strip
+const span = () => Math.min(320, geo ? geo.height - geo.b.height : 320); // how far an upward pull opens the sheet
 
 function paint(kind, p) {
   const el = panels[kind]; if (!el || !geo) return;
@@ -276,7 +306,7 @@ export function refreshSummary() {
 
 function makePanel(kind) {
   const el = document.createElement('div'); el.className = 'pan pan-' + kind; el.id = 'pan-' + kind;
-  el.innerHTML = `<div class="pan-box">${kind === 'up' ? WIND_UP : `<svg class="pan-wind side" viewBox="0 0 1000 60" preserveAspectRatio="none" aria-hidden="true"><path pathLength="100" d="M0 14h420c40 0 60-10 100-10s70 12 480 6"/><path pathLength="100" d="M0 30h300c50 0 80 12 130 12s120-14 570-8"/><path pathLength="100" d="M0 46h520c30 0 50-9 80-9s70 8 400 4"/></svg>`}
+  el.innerHTML = `<div class="pan-box">${kind === 'up' ? WIND_UP : ''}
     <div class="pan-c">${kind === 'up' ? `<div class="sum-top"><div class="days sum-tabs"><span class="pill"></span>${PAGES.map(() => '<button type="button"></button>').join('')}</div></div>
       <div class="sum-view"><div class="sum-track">${PAGES.map(() => '<section></section>').join('')}</div></div>` : ''}</div></div>`;
   document.body.append(el);
@@ -314,18 +344,24 @@ function onMove(ev) {
     else drag.mode = 'none';
     if (drag.mode !== 'none' && drag.mode !== 'page') document.body.classList.add('pulling');
   }
+  // The panel follows the finger for the first bit; past a small pull it lets go
+  // and glides the rest of the way by itself (or back, when you push it closed).
+  const SNAP = 0.22;
   if (drag.mode === 'up') {
     if (dy > 0 && !openKind) return;
     if (openKind !== 'up') begin('up');
     const p = rubber(-dy / span()); springs.up.jump(p); sample(p);
+    if (p > SNAP) { drag.mode = 'done'; settle('up', 1, Math.max(1.5, velocity(drag))); }
   } else if (drag.mode === 'side') {
     const kind = dx < 0 ? 'ai' : 'trend';
     if (openKind !== kind) begin(kind);
     const p = rubber(Math.abs(dx) / dist()); springs[kind].jump(p); sample(p);
+    if (p > SNAP) { drag.mode = 'done'; settle(kind, 1, Math.max(1.5, velocity(drag))); }
   } else if (drag.mode === 'adjust') {
     const k = drag.kind;
     const delta = k === 'up' ? -dy / span() : k === 'ai' ? -dx / dist() : dx / dist();
     const p = rubber(drag.p0 + delta); springs[k].jump(p); sample(p);
+    if (p < 1 - SNAP) { drag.mode = 'done'; settle(k, 0, Math.min(-1.5, velocity(drag))); }
   } else if (drag.mode === 'page') {
     const track = panels.up.querySelector('.sum-track'), w = panels.up.offsetWidth || 1;
     const edge = (page === 0 && dx > 0) || (page === PAGES.length - 1 && dx < 0);
@@ -348,9 +384,9 @@ function onUp(ev) {
     goPage(page + (dx < -w * 0.18 ? 1 : dx > w * 0.18 ? -1 : 0), Math.abs(dx) > w * 0.18);
     return;
   }
-  if (!openKind || d.mode === 'none') return;
+  if (!openKind || d.mode === 'none' || d.mode === 'done') return;
   const kind = openKind, sp = springs[kind], p = sp.x, v = velocity(d);
-  const target = p + v * 0.18 > 0.5 ? 1 : 0;
+  const target = d.mode === 'adjust' ? (p + v * 0.2 < 1 - 0.22 ? 0 : 1) : (p + v * 0.2 > 0.12 ? 1 : 0);
   settle(kind, target, Math.max(-4, Math.min(4, v)));
 }
 

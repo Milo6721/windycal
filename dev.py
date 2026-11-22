@@ -46,44 +46,50 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(404, {"error": "not_found"})
         super().do_GET()
 
-    def gemini(self, key, spec, system, text, config):
-        """One call to Gemini. Returns the text, or None after answering with an error."""
-        payload = {
-            "systemInstruction": {"parts": [{"text": system}]},
-            "contents": [{"role": "user", "parts": [{"text": text}]}],
-            "generationConfig": config,
-        }
-        model = os.environ.get("GEMINI_MODEL", spec["model"])
-        req = urllib.request.Request(
-            "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
-            data=json.dumps(payload).encode(),
-            headers={"content-type": "application/json", "x-goog-api-key": key},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=60) as r:
-                msg = json.load(r)
-        except urllib.error.HTTPError as e:
-            raw = e.read().decode(errors="replace")
+    def gemini(self, key, spec, system, text, config, smart=False):
+        """Tries the model list like api/estimate.js. Returns the text, or None after answering with an error."""
+        models = [m for m in [os.environ.get("GEMINI_MODEL")] + spec["models_smart" if smart else "models_fast"] if m]
+        models = list(dict.fromkeys(models))
+        last = (502, {"error": "upstream"})
+        for model in models:
+            cfg = dict(config)
+            if model.startswith("gemini-2.0"):
+                cfg.pop("thinkingConfig", None)
+            payload = {
+                "systemInstruction": {"parts": [{"text": system}]},
+                "contents": [{"role": "user", "parts": [{"text": text}]}],
+                "generationConfig": cfg,
+            }
+            req = urllib.request.Request(
+                "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model,
+                data=json.dumps(payload).encode(),
+                headers={"content-type": "application/json", "x-goog-api-key": key},
+            )
             try:
-                detail = str(json.loads(raw)["error"]["message"])[:300]
-            except Exception:
-                detail = raw[:300]
-            sys.stderr.write("Gemini API %s: %s\n" % (e.code, detail))
-            if e.code == 429:
-                self.send_json(429, {"error": "rate_limited", "detail": detail})
-            elif e.code in (401, 403) or "api key" in detail.lower():
-                self.send_json(503, {"error": "bad_key", "detail": detail})
-            else:
-                self.send_json(502, {"error": "upstream", "detail": "%s: %s %s" % (model, e.code, detail)})
-            return None
-        except Exception as e:
-            sys.stderr.write("Gemini API unreachable: %s\n" % e)
-            self.send_json(502, {"error": "unreachable"})
-            return None
-        cands = msg.get("candidates") or []
-        if not cands or not cands[0].get("content"):
-            return ""
-        return "".join(p.get("text", "") for p in cands[0]["content"].get("parts", []) if not p.get("thought"))
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    msg = json.load(r)
+            except urllib.error.HTTPError as e:
+                raw = e.read().decode(errors="replace")
+                try:
+                    detail = str(json.loads(raw)["error"]["message"]).split("\n")[0][:220]
+                except Exception:
+                    detail = raw[:220]
+                sys.stderr.write("Gemini %s %s: %s\n" % (model, e.code, detail))
+                if e.code in (401, 403) or (e.code == 400 and "api key" in detail.lower()):
+                    self.send_json(503, {"error": "bad_key", "detail": detail})
+                    return None
+                last = (429, {"error": "rate_limited", "detail": detail}) if e.code == 429 else (502, {"error": "upstream", "detail": "%s: %s %s" % (model, e.code, detail)})
+                continue
+            except Exception as e:
+                sys.stderr.write("Gemini unreachable: %s\n" % e)
+                last = (502, {"error": "unreachable"})
+                continue
+            cands = msg.get("candidates") or []
+            if not cands or not cands[0].get("content"):
+                return ""
+            return "".join(p.get("text", "") for p in cands[0]["content"].get("parts", []) if not p.get("thought"))
+        self.send_json(*last)
+        return None
 
     def do_POST(self):
         if self.path != "/api/estimate":
@@ -114,7 +120,7 @@ class Handler(SimpleHTTPRequestHandler):
                     "foods": [str(f)[:120] for f in (d.get("foods") or [])[:30]],
                 } for d in days],
             }
-            text = self.gemini(key, spec, spec["summary_system"], json.dumps(payload, ensure_ascii=False), {"temperature": 0.6, "thinkingConfig": {"thinkingBudget": 1024}})
+            text = self.gemini(key, spec, spec["summary_system"], json.dumps(payload, ensure_ascii=False), {"temperature": 0.6, "thinkingConfig": {"thinkingBudget": 1024}}, smart=True)
             if text is None:
                 return
             if not text.strip():
@@ -132,7 +138,7 @@ class Handler(SimpleHTTPRequestHandler):
             "responseSchema": spec["schema"],
             "temperature": 0.2,
             "thinkingConfig": {"thinkingBudget": 2048 if deep else 0},
-        })
+        }, smart=deep)
         if out is None:
             return
         if not out:

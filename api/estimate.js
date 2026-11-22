@@ -27,7 +27,7 @@ async function estimate(key, body, res) {
   if (!text) return res.status(400).json({ error: "empty" });
   if (text.length > 240) return res.status(400).json({ error: "too_long" });
   const deep = body.deep === true;
-  const out = await gemini(key, spec.system + (deep ? spec.deep_extra : ""), text, {
+  const out = await gemini(key, deep ? spec.models_smart : spec.models_fast, spec.system + (deep ? spec.deep_extra : ""), text, {
     responseMimeType: "application/json",
     responseSchema: spec.schema,
     temperature: 0.2,
@@ -55,7 +55,7 @@ async function summary(key, s, res) {
       foods: (Array.isArray(d.foods) ? d.foods : []).slice(0, 30).map((f) => String(f).slice(0, 120)),
     })),
   };
-  const out = await gemini(key, spec.summary_system, JSON.stringify(payload), {
+  const out = await gemini(key, spec.models_smart, spec.summary_system, JSON.stringify(payload), {
     temperature: 0.6,
     thinkingConfig: { thinkingBudget: 1024 },
   });
@@ -64,44 +64,42 @@ async function summary(key, s, res) {
   return res.status(200).json({ text: out.text.trim() });
 }
 
-// Tries the chosen model, retries once when Gemini is busy, and falls back to other
-// Flash models if this one is unknown. Errors carry Gemini's own message so they can be read.
-const FALLBACK = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash"];
-async function gemini(key, system, userText, generationConfig) {
-  const models = [...new Set([process.env.GEMINI_MODEL, spec.model, ...FALLBACK].filter(Boolean))];
+// Free Gemini keys have a separate daily limit per model, so when one model says
+// "quota exceeded" (429) or "not found" (404) the next one in the list is tried.
+async function gemini(key, list, system, userText, generationConfig) {
+  const models = [...new Set([process.env.GEMINI_MODEL, ...list].filter(Boolean))];
   let last = { error: "upstream", status: 502 };
+  const t0 = Date.now();
   for (const model of models) {
+    if (Date.now() - t0 > 20000) break; // never keep the person waiting for long
     const config = model.startsWith("gemini-2.0") ? { ...generationConfig, thinkingConfig: undefined } : generationConfig;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      let r;
-      try {
-        r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: system }] },
-            contents: [{ role: "user", parts: [{ text: userText }] }],
-            generationConfig: config,
-          }),
-        });
-      } catch { last = { error: "unreachable", status: 502 }; continue; }
-      if (r.ok) {
-        const out = await r.json();
-        const cand = out.candidates && out.candidates[0];
-        if (!cand || !cand.content) return { text: "" };
-        return { text: (cand.content.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("") };
-      }
-      const raw = await r.text().catch(() => "");
-      let detail = "";
-      try { detail = String(JSON.parse(raw).error.message || ""); } catch { detail = raw; }
-      detail = detail.replace(/AIza[0-9A-Za-z_-]{20,}/g, "[key]").slice(0, 300);
-      console.error("Gemini", model, r.status, detail);
-      if (r.status === 429) return { error: "rate_limited", status: 429, detail };
-      if (r.status === 401 || r.status === 403 || /api key/i.test(detail)) return { error: "bad_key", status: 503, detail };
-      last = { error: "upstream", status: 502, detail: `${model}: ${r.status} ${detail}` };
-      if (r.status >= 500) { await new Promise((ok) => setTimeout(ok, 700)); continue; } // busy: try again once
-      break; // 400 or 404 for this model: try the next one
+    let r;
+    try {
+      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: "user", parts: [{ text: userText }] }],
+          generationConfig: config,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch { last = { error: "unreachable", status: 502 }; continue; }
+    if (r.ok) {
+      const out = await r.json();
+      const cand = out.candidates && out.candidates[0];
+      if (!cand || !cand.content) return { text: "" };
+      return { text: (cand.content.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("") };
     }
+    const raw = await r.text().catch(() => "");
+    let detail = "";
+    try { detail = String(JSON.parse(raw).error.message || ""); } catch { detail = raw; }
+    detail = detail.replace(/AIza[0-9A-Za-z_-]{20,}/g, "[key]").split("\n")[0].slice(0, 220);
+    console.error("Gemini", model, r.status, detail);
+    if (r.status === 401 || r.status === 403 || (r.status === 400 && /api key/i.test(detail))) return { error: "bad_key", status: 503, detail };
+    last = r.status === 429 ? { error: "rate_limited", status: 429, detail } : { error: "upstream", status: 502, detail: `${model}: ${r.status} ${detail}` };
+    // 429 (this model's quota is used up), 404 (unknown model), 5xx (busy): try the next model
   }
   return last;
 }

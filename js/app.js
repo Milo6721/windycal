@@ -1,6 +1,6 @@
 // Windy: write what you ate, in plain words.
 import { t, num, longDate, setLang, getLang, locale } from './i18n.js';
-import { getEstimate } from './estimate.js';
+import { getEstimate, aiPaused } from './estimate.js';
 import { targets } from './goal.js';
 import { Spring, countTo, sfx, setSound, toast } from './fx.js';
 import { initSettings, openSettings, closeSettings, settingsOpen } from './settings.js';
@@ -544,8 +544,8 @@ document.addEventListener('keydown', ev => {
 let lastDay = dayKey(0);
 setInterval(() => {
   if (dayKey(0) !== lastDay) { lastDay = dayKey(0); firstTotals = true; setView(view === 'tomorrow' ? 'today' : view, false); }
-  if (navigator.onLine !== false && [0, 1].some(o => list(dayKey(o)).some(e => e.status === 'waiting'))) resume();
-}, 30000);
+  if (navigator.onLine !== false && !aiPaused() && [0, 1].some(o => list(dayKey(o)).some(e => e.status === 'waiting' || e.status === 'rough'))) resume();
+}, 120000);
 
 initSettings();
 initSummary();
