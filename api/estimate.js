@@ -24,6 +24,7 @@ export default async function handler(req, res) {
   if (body.summary) return summary(key, body.summary, res);
   if (body.tip) return tip(key, body.tip, res);
   if (body.image) return photo(key, body, res);
+  if (body.correct) return correct(key, body.correct, res);
   return estimate(key, body, res);
 }
 
@@ -42,7 +43,21 @@ async function estimate(key, body, res) {
   if (!out.text) return res.status(200).json({ is_food: false, items: [] });
   const data = safeParse(out.text);
   if (!data || !Array.isArray(data.items)) return res.status(502).json({ error: "bad_output" });
-  return res.status(200).json({ is_food: data.is_food !== false, items: data.items });
+  return res.status(200).json({ is_food: data.is_food !== false, items: data.items, micros: Array.isArray(data.micros) ? data.micros.slice(0, 8) : [] });
+}
+
+// "Correct with AI": the current ingredients plus what the person says is wrong → the corrected estimate.
+async function correct(key, c, res) {
+  const instruction = String(c.correction || "").trim().slice(0, 300);
+  if (!instruction) return res.status(400).json({ error: "empty" });
+  const items = (Array.isArray(c.items) ? c.items : []).slice(0, 20);
+  const out = await gemini(key, spec.models_fast, spec.correct_system, JSON.stringify({ line: String(c.line || "").slice(0, 240), items, correction: instruction }), {
+    responseMimeType: "application/json", responseSchema: spec.schema, temperature: 0.2, thinkingConfig: { thinkingBudget: 0 },
+  });
+  if (out.error) return res.status(out.status).json({ error: out.error, detail: out.detail });
+  const data = safeParse(out.text || "");
+  if (!data || !Array.isArray(data.items)) return res.status(502).json({ error: "bad_output" });
+  return res.status(200).json({ items: data.items, micros: Array.isArray(data.micros) ? data.micros.slice(0, 8) : [], meal: String(data.meal || "").slice(0, 120) });
 }
 
 async function photo(key, body, res) {
@@ -63,7 +78,7 @@ async function photo(key, body, res) {
   if (out.error) return res.status(out.status).json({ error: out.error, detail: out.detail });
   const result = safeParse(out.text || "");
   if (!result || !Array.isArray(result.items)) return res.status(502).json({ error: "bad_output" });
-  return res.status(200).json({ is_food: result.is_food !== false, items: result.items, meal: String(result.meal || "").slice(0, 120) });
+  return res.status(200).json({ is_food: result.is_food !== false, items: result.items, micros: Array.isArray(result.micros) ? result.micros.slice(0, 8) : [], meal: String(result.meal || "").slice(0, 120) });
 }
 
 const n = (v) => Math.max(0, Math.min(100000, Math.round(+v || 0)));

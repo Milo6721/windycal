@@ -197,6 +197,22 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(502, {"error": "bad_output"})
             return self.send_json(200, {"is_food": data.get("is_food") is not False, "items": data.get("items", []), "meal": str(data.get("meal", ""))[:120]})
 
+        if body.get("correct"):
+            c = body["correct"]
+            instruction = str(c.get("correction", "")).strip()[:300]
+            if not instruction:
+                return self.send_json(400, {"error": "empty"})
+            payload = {"line": str(c.get("line", ""))[:240], "items": (c.get("items") or [])[:20], "correction": instruction}
+            out = self.gemini(key, spec, spec["correct_system"], json.dumps(payload, ensure_ascii=False), {
+                "responseMimeType": "application/json", "responseSchema": spec["schema"], "temperature": 0.2, "thinkingConfig": {"thinkingBudget": 0}})
+            if out is None:
+                return
+            try:
+                data = json.loads(out or "{}")
+            except ValueError:
+                return self.send_json(502, {"error": "bad_output"})
+            return self.send_json(200, {"items": data.get("items", []), "micros": (data.get("micros") or [])[:8], "meal": str(data.get("meal", ""))[:120]})
+
         if body.get("summary"):
             body = body["summary"]
             days = (body.get("days") or [])[:31]
@@ -242,7 +258,7 @@ class Handler(SimpleHTTPRequestHandler):
             data = json.loads(out)
         except ValueError:
             return self.send_json(502, {"error": "bad_output"})
-        self.send_json(200, {"is_food": data.get("is_food") is not False, "items": data.get("items", [])})
+        self.send_json(200, {"is_food": data.get("is_food") is not False, "items": data.get("items", []), "micros": (data.get("micros") or [])[:8]})
 
     def log_message(self, fmt, *args):
         if "/api/" in (args[0] if args else ""):

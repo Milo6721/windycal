@@ -1,6 +1,6 @@
 // Windy: write what you ate, in plain words.
 import { t, num, longDate, setLang, getLang, locale } from './i18n.js';
-import { getEstimate, aiPaused } from './estimate.js';
+import { getEstimate, aiPaused, clean } from './estimate.js';
 import { targets } from './goal.js';
 import { Spring, countTo, sfx, setSound, toast } from './fx.js';
 import { initSettings, openSettings, closeSettings, settingsOpen } from './settings.js';
@@ -66,7 +66,11 @@ export function totalsOf(entries) {
 const UNDO = [], REDO = [];
 const snap = () => JSON.stringify(state.days);
 function pushUndo() { UNDO.push(snap()); if (UNDO.length > 60) UNDO.shift(); REDO.length = 0; }
-function restore(s) { state.days = JSON.parse(s); save(); renderLog(); refreshAll(); resume(); }
+function restore(s) {
+  const openId = cur && cur._e && cur._e.id;
+  state.days = JSON.parse(s); save(); renderLog(); refreshAll(); resume();
+  if (openId && rows.get(openId)) { cur = rows.get(openId); cur.classList.add('picked'); paintDetail(true); } else if (cur) closeDetail();
+}
 function undo() {
   if (!UNDO.length) return toast(t('nothingUndo'));
   REDO.push(snap()); restore(UNDO.pop()); sfx('pop');
@@ -117,7 +121,7 @@ function makeRow(e) {
   ta.addEventListener('blur', () => { if (!rendering && row.isConnected) { clearTimeout(row._t); commit(row); } });
   row.querySelector('.r').addEventListener('click', () => {
     if (!row._e) return ta.focus();
-    const b = row.querySelector('.r').getBoundingClientRect(); openDetail(row, b.right, b.top);
+    openDetail(row);
   });
   row.querySelector('.mic').addEventListener('click', () => dictate(row));
   const x = row.querySelector('.x'); x.title = t('mDelete'); x.setAttribute('aria-label', t('mDelete'));
@@ -198,6 +202,7 @@ async function estimate(e, quiet = false, fresh = false) {
   const real = res.source === 'ai' || res.source === 'cache';
   if (quiet && !real) return; // still no AI: keep what we have
   live.items = res.items; live.why = real ? undefined : res.reason; delete live.deep;
+  if (res.micros?.length) live.micros = res.micros; else delete live.micros;
   live.status = real ? (res.notFood ? 'unknown' : 'done') : res.source === 'table' ? 'rough' : 'waiting';
   save();
   const row = rows.get(e.id);
@@ -216,12 +221,11 @@ function paint(row, animate) {
   row.classList.toggle('thinking', e.status === 'pending');
   row.classList.toggle('waiting', e.status === 'waiting');
   row.classList.toggle('unknown', e.status === 'unknown');
-  row.classList.toggle('has-sub', (has && e.status !== 'pending') || !!e.photo);
+  row.classList.toggle('has-sub', has && e.status !== 'pending');
   row.querySelector('.state span').textContent = e.status === 'pending' && e.deep ? t('thinkingMore') : t(e.status === 'waiting' ? (['no_key', 'bad_key', 'rate_limited', 'offline', 'photo'].includes(e.why) ? 'why_' + e.why : 'waiting') : e.status === 'unknown' ? 'unknown' : 'estimating');
   const sub = row.querySelector('.sub');
   let th = sub.querySelector('img');
-  if (e.photo && !th) { th = document.createElement('img'); th.className = 'thumb'; th.alt = ''; sub.prepend(th); }
-  if (th) { if (e.photo) th.src = e.photo; else th.remove(); }
+  if (th) th.remove(); // photos never show on the list, only in the detail view
   if (!has) { if (e.photo) { sub.querySelector('.dot').hidden = true; sub.querySelector('span').textContent = ''; } return; }
   sub.querySelector('.dot').hidden = false;
   const tot = totalsOf([e]);
@@ -230,7 +234,7 @@ function paint(row, animate) {
   const dot = row.querySelector('.dot');
   dot.className = 'dot' + (rough ? ' rough' : e.items.some(it => it.confidence === 'medium') ? ' mid' : '');
   row.querySelector('.sub span').textContent =
-    (m !== 1 ? `${fmtMult(m)} · ` : '') + e.items.map(it => it.portion).filter(Boolean).join(', ') +
+    (m !== 1 ? `${m}× · ` : '') + e.items.map(it => it.portion).filter(Boolean).join(', ') +
     (grams ? ` · ~${num(grams)} g` : '') + (e.status === 'rough' ? ` · ${t('rough')}` : '');
   countTo(row.querySelector('.kcal b'), tot.kcal, num, !animate, 520);
   const ms = row.querySelectorAll('.macs i');
@@ -521,136 +525,194 @@ function resume() {
   }
 }
 
-// ---------- the detail card: pops up in the bottom-right corner ----------
-const ACT = {
-  again: '<path d="M10 3c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z"/><path d="M18.5 14c.3 2.3 1.2 3.2 3.5 3.5-2.3.3-3.2 1.2-3.5 3.5"/>',
-  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
-  move: '<path d="M5 12h14"/><path d="M13 6l6 6-6 6"/>',
-  del: '<path d="M4 7h16"/><path d="M9.5 7V5h5v2"/><path d="M6.5 7l1 12a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2l1-12"/>',
+// ---------- the detail view: everything about one food, one click away ----------
+// Desktop: a panel that slides in from the right. Phone: a bottom sheet you can swipe down.
+// Top to bottom: name and calories, macros with their share, more nutrients, the ingredients
+// (each weight editable, everything updates live) and "Correct with AI". Photos are never shown.
+const DV = {
+  close: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  spark: '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M10 3c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z"/><path d="M18.5 14c.3 2.3 1.2 3.2 3.5 3.5-2.3.3-3.2 1.2-3.5 3.5-.3-2.3-1.2-3.2-3.5-3.5 2.3-.3 3.2-1.2 3.5-3.5z" opacity=".55"/></svg>',
+  move: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>',
 };
-const MIN = 0.25, MAX = 3, MARKS = [0.5, 1, 1.5, 2, 3];
-const fmtMult = m => (m === 0.25 ? '¼' : m === 0.5 ? '½' : m === 0.75 ? '¾' : m === 1.5 ? '1½' : m === 2.5 ? '2½' : String(+m.toFixed(2))) + '×';
-const pos = v => (v - MIN) / (MAX - MIN);
-const card = document.createElement('div'); card.id = 'detail'; card.className = 'detail'; card.setAttribute('role', 'dialog');
-document.body.append(card);
-let cur = null; // the row whose card is open
+const card = document.createElement('aside'); card.id = 'detail'; card.className = 'dv'; card.setAttribute('role', 'dialog'); card.setAttribute('aria-modal', 'false');
+const dim = document.createElement('div'); dim.className = 'dv-dim';
+document.body.append(dim, card);
+let cur = null;      // the row whose food is open
+let editing = false; // one undo step per burst of edits
+let editT = 0;
 export const detailOpen = () => card.classList.contains('open');
-export function closeDetail() { if (!cur) return; cur.classList.remove('picked'); cur = null; card.classList.remove('open'); }
+export function closeDetail() {
+  if (!cur) return;
+  cur.classList.remove('picked'); cur = null;
+  card.classList.remove('open'); dim.classList.remove('open');
+  card.style.transform = '';
+}
+
+const NUT = [['fiber', 'g'], ['sugar', 'g'], ['saturated_fat', 'g'], ['sodium', 'mg']];
+const scaleItem = (it, k) => {
+  const o = { ...it };
+  for (const f of ['grams', 'calories', 'protein', 'carbs', 'fat', 'fiber', 'sugar', 'saturated_fat', 'sodium']) if (o[f] != null) o[f] = +(o[f] * k).toFixed(f === 'calories' || f === 'grams' || f === 'sodium' ? 0 : 1);
+  return o;
+};
+const liveEntry = () => cur && cur._e && locate(cur._e.id);
+function beginEdit() { // the first change in a burst becomes one undo step
+  if (!editing) { pushUndo(); editing = true; }
+  clearTimeout(editT); editT = setTimeout(() => { editing = false; }, 1500);
+}
+// A portion multiplier from older versions is folded into the ingredients' own grams.
+function bakeMult(e) {
+  if (!e || !e.items?.length || (e.mult || 1) === 1) return;
+  e.items = e.items.map(it => scaleItem(it, e.mult)); e.mult = 1; save();
+}
 
 function buildDetail() {
-  const btn = (act, label, cls = '') => `<button type="button" class="d-act ${cls}" data-act="${act}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ACT[act]}</svg><span>${label}</span></button>`;
   card.innerHTML = `
-    <div class="d-head"><div class="d-k"><b>0</b><small>kcal</small></div><button type="button" class="d-close" aria-label="${t('close')}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-    <p class="d-name"></p>
-    <img class="d-photo" alt="" hidden>
-    <div class="d-wave"></div>
-    <div class="d-bar">${MACROS.map(k => `<i class="bg-${k}"></i>`).join('')}</div>
-    <div class="d-macs">${MACROS.map(k => `<div class="d-mac m-${k}"><span class="ic">${icon(k, 18)}</span><b><i>0</i> g</b><span class="lb">${t(k)}</span><em>0%</em></div>`).join('')}</div>
-    <div class="d-items"></div>
-    <div class="d-portion">
-      <div class="d-p-top"><span>${t('portion')}</span><b class="d-mult">1×</b><em class="d-g"></em></div>
-      <div class="slider" role="slider" tabindex="0" aria-label="${t('portion')}" aria-valuemin="${MIN}" aria-valuemax="${MAX}">
-        <div class="s-track"><div class="s-fill"></div></div><div class="s-thumb"></div>
-      </div>
-      <div class="s-marks">${MARKS.map(m => `<button type="button" data-m="${m}" style="left:${pos(m) * 100}%">${fmtMult(m)}</button>`).join('')}</div>
+    <div class="dv-grab" aria-hidden="true"><i></i></div>
+    <div class="dv-head">
+      <div class="dv-title"><h2></h2><p class="dv-src"></p></div>
+      <button type="button" class="dv-x" aria-label="${t('close')}">${DV.close}</button>
     </div>
-    <div class="d-acts">${btn('again', t('mAgain'), 'wide')}${btn('edit', t('mEdit'))}${btn('move', '')}${btn('del', t('mDelete'), 'danger')}</div>`;
+    <div class="dv-kcal"><b>0</b><span>kcal</span><em class="dv-est">${t('estimating')}</em></div>
+    <div class="dv-macros">${MACROS.map(k => `
+      <div class="dv-mac m-${k}"><span class="dv-ml">${icon(k, 15)}${t(k)}</span><b><i>0</i> g</b><em>0%</em><u><s></s></u></div>`).join('')}
+    </div>
+    <section class="dv-sec dv-nut-sec"><h4>${t('moreNutrients')}<small></small></h4><div class="dv-nut"></div></section>
+    <section class="dv-sec"><h4>${t('ingredients')}</h4><div class="dv-ings"></div></section>
+    <form class="dv-fix" autocomplete="off">
+      <label class="dv-fix-l">${DV.spark}<span>${t('fixTitle')}</span></label>
+      <div class="dv-fix-row"><input type="text" maxlength="300" placeholder="${t('fixPh')}"><button type="submit" aria-label="${t('fixGo')}">${DV.spark}</button></div>
+      <p class="dv-fix-msg" hidden></p>
+    </form>
+    <div class="dv-foot"><button type="button" class="dv-act" data-act="move">${DV.move}<span></span></button><button type="button" class="dv-act danger" data-act="del">${TRASH}<span>${t('mDelete')}</span></button></div>`;
 }
 
-function setThumb(v, smooth) {
-  const sl = card.querySelector('.slider'); if (!sl) return;
-  sl.classList.toggle('smooth', !!smooth);
-  sl.style.setProperty('--p', pos(v));
-  sl.setAttribute('aria-valuenow', v); sl.setAttribute('aria-valuetext', fmtMult(v));
-  card.querySelectorAll('.s-marks button').forEach(b => b.classList.toggle('on', Math.abs(+b.dataset.m - v) < 0.01));
-}
-
-function paintDetail(landed = false, opening = false) {
+function paintDetail(landed = false) {
   if (!cur) return;
-  const e = cur._e && locate(cur._e.id); if (!e) return closeDetail();
-  const has = e.items?.length > 0, m = e.mult || 1, tot = totalsOf([e]);
-  const thinking = e.status === 'pending';
-  card.classList.toggle('thinking', thinking); card.classList.toggle('empty', !has);
-  const ph = card.querySelector('.d-photo'); ph.hidden = !e.photo; if (e.photo) ph.src = e.photo;
-  card.querySelector('.d-name').textContent = thinking ? (e.deep ? t('thinkingMore') : t('estimating')) : e.text;
-  const quick = !opening && !landed;
-  countTo(card.querySelector('.d-k b'), tot.kcal, num, quick, 700);
-  const kc = MACROS.map((k, i) => tot[k] * [4, 4, 9][i]), sum = kc.reduce((a, b) => a + b, 0) || 1;
-  card.querySelectorAll('.d-bar i').forEach((el, i) => { el.style.flexGrow = Math.max(kc[i], 0.0001); });
-  card.querySelectorAll('.d-mac').forEach((el, i) => {
-    countTo(el.querySelector('b i'), tot[MACROS[i]], num, quick, 700);
-    el.querySelector('em').textContent = has ? Math.round((kc[i] / sum) * 100) + '%' : '';
+  const e = liveEntry(); if (!e) return closeDetail();
+  const items = e.items || [], m = e.mult || 1, tot = totalsOf([e]), thinking = e.status === 'pending';
+  card.classList.toggle('thinking', thinking || card.classList.contains('fixing'));
+  card.querySelector('.dv-title h2').textContent = e.text;
+  card.querySelector('.dv-src').textContent = e.barcode ? t('fromLabel') : e.status === 'rough' ? t('roughSrc') : items.length ? t('aiSrc') : '';
+  const kb = card.querySelector('.dv-kcal b'); countTo(kb, tot.kcal, num, !landed, 600);
+  // macros: grams, and each one's share of the calories
+  const kc = [tot.protein * 4, tot.carbs * 4, tot.fat * 9], sum = kc.reduce((a, b) => a + b, 0) || 1;
+  card.querySelectorAll('.dv-mac').forEach((el, i) => {
+    countTo(el.querySelector('b i'), tot[MACROS[i]], num, !landed, 600);
+    const share = kc[i] / sum;
+    el.querySelector('em').textContent = items.length ? Math.round(share * 100) + '%' : '';
+    el.querySelector('s').style.transform = `scaleX(${items.length ? share : 0})`;
   });
-  const list2 = card.querySelector('.d-items'); list2.innerHTML = '';
-  if (has && e.items.length > 1) for (const it of e.items) {
-    const d = document.createElement('div');
-    d.append(Object.assign(document.createElement('span'), { textContent: `${it.name} · ${it.portion}` }), Object.assign(document.createElement('b'), { textContent: `${num(it.calories * m)} kcal` }));
-    list2.append(d);
+  // more nutrients: summed from the ingredients, plus the vitamins and minerals for the whole line
+  const nut = NUT.map(([k, u]) => { const has = items.some(it => it[k] != null); return has ? [k, u, items.reduce((a, it) => a + (+it[k] || 0) * m, 0)] : null; }).filter(Boolean);
+  const micros = (e.micros || []).filter(x => x && x.name);
+  const nb = card.querySelector('.dv-nut');
+  nb.innerHTML = nut.length || micros.length
+    ? nut.map(([k, u, v]) => `<div><span>${t('n_' + k)}</span><b>${u === 'mg' ? num(v) : (Math.round(v * 10) / 10).toLocaleString(locale())} ${u}</b></div>`).join('')
+      + micros.map(x => `<div><span></span><b>${(+x.amount || 0).toLocaleString(locale(), { maximumFractionDigits: (+x.amount || 0) >= 10 ? 0 : 1 })} ${esc(x.unit || '')}</b></div>`).join('')
+    : `<p class="dv-none">${t('noNutrients')}</p>`;
+  nb.querySelectorAll('div').forEach((d, i) => { if (i >= nut.length) d.querySelector('span').textContent = micros[i - nut.length].name; });
+  card.querySelector('.dv-nut-sec small').textContent = e.barcode ? t('fromLabelShort') : (nut.length || micros.length) ? t('estimates') : '';
+  // ingredients, each with its own weight that can be changed
+  const ib = card.querySelector('.dv-ings');
+  const focusedIdx = document.activeElement?.closest?.('.dv-ing')?.dataset.i;
+  if (focusedIdx == null || ib.children.length !== items.length) {
+    ib.innerHTML = items.length ? items.map((it, i) => `
+      <div class="dv-ing" data-i="${i}">
+        <span class="dv-in">${esc(it.name || '')}</span>
+        <div class="dv-g"><button type="button" class="dv-step" data-d="-1" aria-label="−">−</button><label><input type="number" inputmode="numeric" min="1" max="5000" step="1" value="${Math.round((it.grams || 0) * m)}"><i>g</i></label><button type="button" class="dv-step" data-d="1" aria-label="+">+</button></div>
+        <b class="dv-ik">${num(it.calories * m)}</b>
+      </div>`).join('') : `<p class="dv-none">${thinking ? t('estimating') : t('noIngredients')}</p>`;
+  } else {
+    ib.querySelectorAll('.dv-ing').forEach((row, i) => { if (String(i) !== focusedIdx && items[i]) row.querySelector('input').value = Math.round(items[i].grams * m); if (items[i]) row.querySelector('.dv-ik').textContent = num(items[i].calories * m); });
   }
-  const grams = has ? e.items.reduce((a, it) => a + (it.grams || 0), 0) * m : 0;
-  card.querySelector('.d-mult').textContent = fmtMult(m);
-  card.querySelector('.d-g').textContent = grams ? `~${num(grams)} g` : '';
-  if (!dragging) setThumb(m, !opening);
   const onToday = (state.days[dayKey(0)] || []).includes(e);
   card.querySelector('[data-act=move] span').textContent = t(onToday ? 'mToTomorrow' : 'mToToday');
   if (landed) { card.classList.remove('landed'); void card.offsetWidth; card.classList.add('landed'); }
 }
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-function openDetail(row, x, y) {
+function openDetail(row) {
   const e = row._e && locate(row._e.id); if (!e) return;
-  closeSummary();
+  closeSummary(); cm.classList.remove('open');
   if (cur) cur.classList.remove('picked');
   document.activeElement?.blur?.();
-  cur = row; row.classList.add('picked');
-  buildDetail();
-  paintDetail(false, true);
-  card.querySelectorAll('.d-k b, .d-mac b i').forEach(n => { n._n = 0; n.textContent = '0'; });
-  paintDetail(true, false);
-  card.classList.remove('open'); void card.offsetWidth; card.classList.add('open'); sfx('pop');
+  cur = row; row.classList.add('picked'); editing = false;
+  bakeMult(e);
+  buildDetail(); paintDetail(false);
+  card.querySelectorAll('.dv-kcal b, .dv-mac b i').forEach(n => { n._n = 0; n.textContent = '0'; });
+  paintDetail(true);
+  card.scrollTop = 0;
+  card.classList.remove('open'); void card.offsetWidth; card.classList.add('open'); dim.classList.add('open');
+  card.querySelector('.dv-x').focus({ preventScroll: true });
 }
 
-// The portion slider: follows your finger exactly, then settles on the nearest quarter with a spring.
-let dragging = false, dragUndo = false;
-function setMult(v, live) {
-  const e = cur && cur._e && locate(cur._e.id); if (!e) return;
-  if (!dragUndo) { pushUndo(); dragUndo = true; }
-  e.mult = v; paint(cur, !live); renderTotals();
-  const tot = totalsOf([e]), grams = e.items.reduce((a, it) => a + (it.grams || 0), 0) * v;
-  countTo(card.querySelector('.d-k b'), tot.kcal, num, live, 380);
-  card.querySelectorAll('.d-mac').forEach((el, i) => countTo(el.querySelector('b i'), tot[MACROS[i]], num, live, 380));
-  card.querySelectorAll('.d-items b').forEach((b, i) => { b.textContent = `${num(e.items[i].calories * v)} kcal`; });
-  card.querySelector('.d-mult').textContent = fmtMult(v);
-  card.querySelector('.d-g').textContent = grams ? `~${num(grams)} g` : '';
+// change one ingredient's weight: its numbers scale with it, and so does everything above
+function setGrams(i, g) {
+  const e = liveEntry(); if (!e || !e.items?.[i]) return;
+  g = Math.max(1, Math.min(5000, Math.round(g)));
+  const it = e.items[i], old = it.grams || 0;
+  if (!old || g === Math.round(old)) return;
+  beginEdit();
+  const totalBefore = e.items.reduce((a, x) => a + (x.grams || 0), 0);
+  e.items[i] = scaleItem(it, g / old); e.items[i].grams = g;
+  const totalAfter = e.items.reduce((a, x) => a + (x.grams || 0), 0);
+  if (e.micros?.length && totalBefore) e.micros = e.micros.map(x => ({ ...x, amount: +((+x.amount || 0) * totalAfter / totalBefore).toFixed(2) }));
+  save();
+  if (cur) paint(cur, true);
+  renderTotals(); paintDetail(true);
 }
-const snap4 = v => Math.min(MAX, Math.max(MIN, Math.round(v * 4) / 4));
-function commitMult(v) { setThumb(v, true); setMult(v, false); save(); dragUndo = false; sfx('pop'); }
-card.addEventListener('pointerdown', ev => {
-  const sl = ev.target.closest('.slider'); if (!sl) return;
-  ev.preventDefault(); sl.setPointerCapture(ev.pointerId); dragging = true; sl.classList.add('drag');
-  const r = sl.getBoundingClientRect();
-  const at = cx => MIN + Math.min(1, Math.max(0, (cx - r.left) / r.width)) * (MAX - MIN);
-  const move = mv => { const v = at(mv.clientX); setThumb(v, false); setMult(Math.round(v * 20) / 20, true); };
-  sl.classList.add('smooth'); setThumb(at(ev.clientX), true); setMult(Math.round(at(ev.clientX) * 20) / 20, true);
-  setTimeout(() => sl.classList.remove('smooth'), 260);
-  const up = u => { sl.removeEventListener('pointermove', move); sl.removeEventListener('pointerup', up); sl.removeEventListener('pointercancel', up); dragging = false; sl.classList.remove('drag'); commitMult(snap4(at(u.clientX))); };
-  sl.addEventListener('pointermove', move); sl.addEventListener('pointerup', up); sl.addEventListener('pointercancel', up);
+card.addEventListener('input', ev => {
+  const inp = ev.target.closest('.dv-ing input'); if (!inp) return;
+  const v = parseFloat(inp.value); if (v > 0) setGrams(+inp.closest('.dv-ing').dataset.i, v);
 });
 card.addEventListener('keydown', ev => {
-  if (!ev.target.closest('.slider')) return;
-  const e = cur && cur._e && locate(cur._e.id); if (!e) return;
-  const d = ev.key === 'ArrowRight' || ev.key === 'ArrowUp' ? 0.25 : ev.key === 'ArrowLeft' || ev.key === 'ArrowDown' ? -0.25 : 0;
-  if (d) { ev.preventDefault(); commitMult(snap4((e.mult || 1) + d)); }
+  if (ev.target.closest('.dv-ing input') && ev.key === 'Enter') ev.target.blur();
+});
+
+// "Correct with AI": say what's wrong in plain words
+async function correctWithAI(text) {
+  const e = liveEntry(); if (!e) return;
+  const msg = card.querySelector('.dv-fix-msg'); msg.hidden = true;
+  card.classList.add('fixing', 'thinking');
+  let res = null, why = '';
+  try {
+    const r = await fetch('/api/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(30000),
+      body: JSON.stringify({ correct: { line: e.text, items: (e.items || []).map(it => ({ name: it.name, grams: it.grams, calories: it.calories, protein: it.protein, carbs: it.carbs, fat: it.fat })), correction: text } }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && Array.isArray(j.items)) res = j; else why = j.error || 'upstream';
+  } catch { why = 'unreachable'; }
+  card.classList.remove('fixing', 'thinking');
+  const live = locate(e.id); if (!live) return;
+  if (!res) { msg.hidden = false; msg.textContent = ['no_key', 'bad_key', 'rate_limited'].includes(why) ? t('why_' + why) : t('fixFail'); return; }
+  pushUndo(); editing = false;
+  live.items = res.items.map(clean); live.mult = 1;
+  if (res.micros?.length) live.micros = res.micros;
+  live.status = 'done';
+  save();
+  if (cur) paint(cur, true);
+  renderTotals(); paintDetail(true); sfx('land');
+  card.querySelector('.dv-fix input').value = '';
+  toast(t('fixed'), { label: t('undo'), kbd: '⌘Z', run: undo });
+}
+
+card.addEventListener('submit', ev => {
+  ev.preventDefault();
+  const v = card.querySelector('.dv-fix input').value.trim(); if (v) correctWithAI(v);
 });
 card.addEventListener('click', ev => {
-  if (ev.target.closest('.d-close')) return closeDetail();
-  const mk = ev.target.closest('.s-marks button'); if (mk) return commitMult(+mk.dataset.m);
-  const b = ev.target.closest('.d-act'); if (!b || !cur) return;
+  if (ev.target.closest('.dv-x')) return closeDetail();
+  const st = ev.target.closest('.dv-step');
+  if (st) {
+    const row = st.closest('.dv-ing'), inp = row.querySelector('input'), g = parseFloat(inp.value) || 0;
+    const step = g >= 200 ? 25 : 10;
+    setGrams(+row.dataset.i, Math.max(1, (+st.dataset.d > 0 ? Math.floor(g / step) + 1 : Math.ceil(g / step) - 1) * step));
+    return;
+  }
+  const b = ev.target.closest('.dv-act'); if (!b || !cur) return;
   const row = cur, live = locate(row._e.id); if (!live) return;
   const act = b.dataset.act;
-  if (act === 'again') { estimate(live, false, true); return; }
   closeDetail();
-  if (act === 'edit') focusRow(row);
-  else if (act === 'del') { row.querySelector('.txt').value = ''; commit(row); }
+  if (act === 'del') { row.querySelector('.txt').value = ''; commit(row); }
   else if (act === 'move') {
     const onToday = (state.days[dayKey(0)] || []).includes(live);
     pushUndo();
@@ -660,19 +722,38 @@ card.addEventListener('click', ev => {
     toast(t(onToday ? 'movedTomorrow' : 'movedToday'), { label: t('undo'), kbd: '⌘Z', run: undo });
   }
 });
+dim.addEventListener('click', closeDetail);
+
+// on a phone the sheet follows your finger down and closes past a point
+(() => {
+  let y0 = 0, dy = 0, on = false, t0 = 0;
+  card.addEventListener('pointerdown', ev => {
+    if (innerWidth > 700 || !ev.target.closest('.dv-grab, .dv-head') || ev.target.closest('button')) return;
+    on = true; y0 = ev.clientY; dy = 0; t0 = performance.now(); card.classList.add('dragging');
+    try { card.setPointerCapture(ev.pointerId); } catch {}
+  });
+  card.addEventListener('pointermove', ev => { if (!on) return; dy = Math.max(0, ev.clientY - y0); card.style.transform = `translateY(${dy}px)`; });
+  const end = () => {
+    if (!on) return; on = false; card.classList.remove('dragging');
+    const v = dy / Math.max(1, performance.now() - t0);
+    card.style.transform = '';
+    if (dy > 110 || (v > 0.6 && dy > 30)) closeDetail();
+  };
+  card.addEventListener('pointerup', end); card.addEventListener('pointercancel', end);
+})();
 
 $('log').addEventListener('contextmenu', ev => {
-  const row = ev.target.closest('.row:not(.draft):not(.out)'); if (!row || !row._e) return;
-  ev.preventDefault(); openDetail(row, ev.clientX, ev.clientY);
+  const row = ev.target.closest('.row:not(.draft):not(.out)'); if (!row || !row._e || ev.target.closest('textarea:focus')) return;
+  ev.preventDefault(); openDetail(row);
 });
 let pressT;
 $('log').addEventListener('touchstart', ev => { // long-press on a phone
   const row = ev.target.closest('.row:not(.draft):not(.out)'); if (!row || !row._e) return;
-  const p = ev.touches[0]; clearTimeout(pressT);
-  pressT = setTimeout(() => openDetail(row, p.clientX, p.clientY), 520);
+  clearTimeout(pressT);
+  pressT = setTimeout(() => openDetail(row), 520);
 }, { passive: true });
 for (const n of ['touchmove', 'touchend', 'touchcancel']) $('log').addEventListener(n, () => clearTimeout(pressT), { passive: true });
-document.addEventListener('pointerdown', ev => { if (cur && !ev.target.closest('#detail') && !ev.target.closest('.row.picked .r')) closeDetail(); });
+document.addEventListener('pointerdown', ev => { if (cur && innerWidth > 700 && !ev.target.closest('#detail, .row.picked .r, .photo-view, #toast')) closeDetail(); });
 
 // ---------- a caret that sways like a reed in the wind ----------
 const caret = document.createElement('div'); caret.className = 'caret'; caret.hidden = true;
@@ -716,6 +797,7 @@ document.addEventListener('keydown', ev => {
   const mod = ev.metaKey || ev.ctrlKey;
   if (mod && ev.key.toLowerCase() === 'z') {
     if (settingsOpen()) return;
+    if (el && el.closest?.('#detail') && /^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
     if (el?.classList.contains('txt')) { // mid-edit: let the text field undo its own typing
       const row = el.closest('.row');
       if (el.value.trim() !== (row._e?.text || '')) return;

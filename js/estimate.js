@@ -6,18 +6,19 @@ let cache = {};
 try { cache = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {}
 
 const norm = s => s.toLowerCase().replace(/\s+/g, ' ').trim();
-function remember(k, items) {
-  cache[k] = { items, t: Date.now() };
+function remember(k, items, micros) {
+  cache[k] = { items, micros, t: Date.now() };
   const keys = Object.keys(cache);
   if (keys.length > 600) keys.sort((a, b) => cache[a].t - cache[b].t).slice(0, 100).forEach(x => delete cache[x]);
   try { localStorage.setItem(KEY, JSON.stringify(cache)); } catch {}
 }
 
-const clean = it => ({
+export const clean = it => ({
   name: String(it.name || ''), portion: String(it.portion || ''),
   grams: Math.max(0, +it.grams || 0), calories: Math.max(0, +it.calories || 0),
   protein: Math.max(0, +it.protein || 0), carbs: Math.max(0, +it.carbs || 0), fat: Math.max(0, +it.fat || 0),
   confidence: ['high', 'medium', 'low'].includes(it.confidence) ? it.confidence : 'medium',
+  ...(it.fiber != null ? { fiber: Math.max(0, +it.fiber || 0), sugar: Math.max(0, +it.sugar || 0), saturated_fat: Math.max(0, +it.saturated_fat || 0), sodium: Math.max(0, +it.sodium || 0) } : {}),
 });
 
 // After Gemini says its free limit is used up, stay quiet for a while instead of asking again and again.
@@ -29,7 +30,7 @@ export function pauseAI(minutes = 15) { try { localStorage.setItem(PAUSE_KEY, St
 // source: 'cache' | 'ai' (a real answer), 'table' (rough), 'none' (nothing yet, retry later)
 export async function getEstimate(text, lang, fresh = false) {
   const k = norm(text);
-  if (!fresh && cache[k]) return { items: cache[k].items, source: 'cache', notFood: !cache[k].items.length };
+  if (!fresh && cache[k]) return { items: cache[k].items, micros: cache[k].micros || [], source: 'cache', notFood: !cache[k].items.length };
 
   let reason = navigator.onLine === false ? 'offline' : 'rate_limited';
   if (navigator.onLine !== false && (fresh || !aiPaused())) {
@@ -44,8 +45,9 @@ export async function getEstimate(text, lang, fresh = false) {
         const j = await r.json();
         if (Array.isArray(j.items)) {
           const items = j.is_food === false ? [] : j.items.map(clean);
-          remember(k, items);
-          return { items, source: 'ai', notFood: !items.length };
+          const micros = Array.isArray(j.micros) ? j.micros.slice(0, 8) : [];
+          remember(k, items, micros);
+          return { items, micros, source: 'ai', notFood: !items.length };
         }
         reason = 'bad_output';
       } else { const j = await r.json().catch(() => ({})); reason = j.error || 'upstream'; if (j.detail) console.warn('Windy AI:', j.detail); if (reason === 'rate_limited') pauseAI(); }

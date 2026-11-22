@@ -79,6 +79,7 @@ async function lookup(code) {
     name: name.toLowerCase(), portion: p.serving_size || `${serving} g`, grams: Math.round(serving),
     calories: Math.round(n['energy-kcal_100g'] * k), protein: +((n.proteins_100g || 0) * k).toFixed(1),
     carbs: +((n.carbohydrates_100g || 0) * k).toFixed(1), fat: +((n.fat_100g || 0) * k).toFixed(1), confidence: 'high',
+    fiber: +((n.fiber_100g || 0) * k).toFixed(1), sugar: +((n.sugars_100g || 0) * k).toFixed(1), saturated_fat: +((n['saturated-fat_100g'] || 0) * k).toFixed(1), sodium: Math.round((n.sodium_100g || 0) * 1000 * k),
   };
   res.className = 'sc-res ok'; res.textContent = `${text} · ${num(item.calories)} kcal`;
   sfx('land');
