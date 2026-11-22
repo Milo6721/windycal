@@ -5,8 +5,21 @@
 //   { op: "get", id }                → { data, rev }
 //   { op: "put", id, data, rev }     → { ok: true, rev } or 409 { rev } when another device saved first
 
-const URL_ = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+// Vercel names these with whatever prefix was chosen when connecting the database
+// (KV_…, STORAGE_…, UPSTASH_REDIS_…), so any *_REST_API_URL / *_REST_API_TOKEN pair works.
+function findStore() {
+  const env = process.env;
+  if (env.KV_REST_API_URL && env.KV_REST_API_TOKEN) return [env.KV_REST_API_URL, env.KV_REST_API_TOKEN];
+  if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) return [env.UPSTASH_REDIS_REST_URL, env.UPSTASH_REDIS_REST_TOKEN];
+  for (const k of Object.keys(env)) {
+    const m = k.match(/^(.*)_REST_API_URL$/) || k.match(/^(.*)_REDIS_REST_URL$/);
+    if (!m) continue;
+    const token = env[`${m[1]}_REST_API_TOKEN`] || env[`${m[1]}_REDIS_REST_TOKEN`];
+    if (env[k] && token) return [env[k], token];
+  }
+  return [null, null];
+}
+const [URL_, TOKEN] = findStore();
 const KEEP = 400 * 24 * 3600; // keep a box for 400 days after its last save
 
 // Saves only if nobody else saved since this device last read it.
