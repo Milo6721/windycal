@@ -5,7 +5,7 @@ import { targets, cmToFtIn, ftInToCm, kgToLb, lbToKg } from './goal.js';
 import { sfx } from './fx.js';
 import { icon, MACROS } from './icons.js';
 import { syncInfo, onSyncChange, startSync, stopSync, syncNow, canJoin, syncLink } from './sync.js';
-import { paintWater } from './water.js';
+import { paintWater, waterGoalMl } from './water.js';
 
 const sheet = () => document.getElementById('setsheet');
 const card = () => document.getElementById('setcard');
@@ -62,7 +62,7 @@ function render() {
 
   <div class="sec"><h3>${t('extras')}</h3><div class="grp">
     ${row(t('water'), `<button type="button" class="switch ${s.water !== false ? 'on' : ''}" data-act="water" role="switch" aria-checked="${s.water !== false}"><i></i></button>`, t('waterSub'))}
-    ${s.water !== false ? row(t('waterGoalLbl'), `<div class="num"><input type="number" inputmode="numeric" data-in="waterGoal" value="${s.waterGoal > 0 ? s.waterGoal : 8}" min="1" max="20"><i>${t('glasses')}</i></div>`) : ''}
+    ${s.water !== false ? row(t('waterGoalLbl'), `<div class="num"><input type="number" inputmode="numeric" data-in="waterGoalMl" value="${waterGoalMl()}" min="250" max="6000" step="250"><i>ml</i></div>`, t('glassIs')) : ''}
     ${row(t('photos'), `<button type="button" class="switch ${s.photos !== false ? 'on' : ''}" data-act="photos" role="switch" aria-checked="${s.photos !== false}"><i></i></button>`, t('photosSub'))}
   </div></div>
 
@@ -134,7 +134,7 @@ export function initSettings() {
     const s = state.settings, body = { ...targets(s).body }, v = parseFloat(el.value);
     if (k === 'name') { s.name = el.value; save(); return; }
     if (k === 'joincode') { el.classList.remove('bad'); return; }
-    if (k === 'waterGoal') { if (v >= 1 && v <= 20) { s.waterGoal = Math.round(v); save(); paintWater(false); } return; }
+    if (k === 'waterGoalMl') { if (v >= 250 && v <= 6000) { s.waterGoalMl = Math.round(v / 50) * 50; delete s.waterGoal; save(); paintWater(false); } return; }
     if (k === 'goalOverride') s.goalOverride = v >= 800 && v <= 8000 ? Math.round(v) : null;
     else if (!isNaN(v)) {
       if (k === 'age') body.age = clamp(v, 14, 100);

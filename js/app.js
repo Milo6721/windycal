@@ -45,7 +45,8 @@ let view = 'today';
 const pad = n => String(n).padStart(2, '0');
 export const keyOf = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 export const dayKey = (off = 0) => { const d = new Date(); d.setDate(d.getDate() + off); return keyOf(d); };
-export const curKey = () => dayKey(view === 'tomorrow' ? 1 : 0);
+const OFFSET = { yesterday: -1, today: 0, tomorrow: 1 };
+export const curKey = () => dayKey(OFFSET[view] || 0);
 const list = k => (state.days[k] = state.days[k] || []);
 const locate = id => { for (const k in state.days) { const e = state.days[k].find(x => x.id === id); if (e) return e; } return null; };
 
@@ -98,7 +99,7 @@ function makeRow(e) {
   row._e = e || null;
   const ta = row.querySelector('.txt');
   ta.value = e ? e.text : '';
-  ta.placeholder = e ? '' : t(view === 'tomorrow' ? 'placeholderTomorrow' : 'placeholder');
+  ta.placeholder = e ? '' : t(view === 'tomorrow' ? 'placeholderTomorrow' : view === 'yesterday' ? 'placeholderYesterday' : 'placeholder');
   row.querySelector('.mic').title = t('dictate');
   const cam = row.querySelector('.cam'); cam.title = t('takePhoto'); cam.setAttribute('aria-label', t('takePhoto'));
   cam.addEventListener('click', () => pickPhoto());
@@ -149,12 +150,19 @@ function onKey(ev, row, ta) {
 
 // A line is finished: create, change or remove its entry, then estimate it.
 function commit(row) {
+  if (dayKey(0) !== lastDay) { // the day changed while this line was open: move to the new day, keep what was typed
+    const typed = !row._e && row.querySelector('.txt').value;
+    checkDay();
+    const d = draftRow(); if (typed && d) { const ta = d.querySelector('.txt'); ta.value = typed; fit(ta); focusRow(d); }
+    return;
+  }
   const ta = row.querySelector('.txt'), text = ta.value.replace(/\s+/g, ' ').trim();
   let e = row._e && locate(row._e.id);
   if (!e) {
     if (!text) return;
     pushUndo();
     e = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text, ts: Date.now(), status: 'pending', items: [], mult: 1 };
+    if (view === 'tomorrow') e.planned = true;
     list(curKey()).push(e);
     row._e = e; rows.set(e.id, row); row.classList.remove('draft'); ta.placeholder = '';
     const d = makeRow(null); d.classList.add('in'); $('log').insertBefore(d, row.nextSibling); fit(d.querySelector('.txt'));
@@ -226,14 +234,15 @@ function paint(row, animate) {
   [tot.protein, tot.carbs, tot.fat].forEach((v, i) => countTo(ms[i], v, num, !animate, 520));
 }
 
-const period = ts => { const h = new Date(ts).getHours(); return h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening'; };
+// Meals planned the day before sit together under "Planned"; the rest by the time they were written.
+const period = e => { if (e.planned && view !== 'tomorrow') return 'plannedGroup'; const h = new Date(e.ts).getHours(); return h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening'; };
 function placeDividers() {
   const log = $('log');
   log.querySelectorAll('.divider').forEach(d => d.remove());
-  if (view !== 'today') return;
+  if (view !== 'today' && view !== 'yesterday') return;
   let last = null;
   for (const row of log.querySelectorAll('.row:not(.draft):not(.out)')) {
-    const p = row._e && period(row._e.ts);
+    const p = row._e && period(row._e);
     if (p && p !== last) { last = p; const d = document.createElement('div'); d.className = 'divider'; d.textContent = t(p); log.insertBefore(d, row); }
   }
 }
@@ -310,7 +319,7 @@ function updateHint() {
   if (s) {
     const b = document.createElement('button'); b.type = 'button'; b.textContent = `${t('sameAs')} ${s}`; b.onclick = acceptSuggestion;
     h.append(b, Object.assign(document.createElement('kbd'), { textContent: 'Tab' }));
-  } else h.textContent = view === 'tomorrow' ? t('helloTomorrow') : t('hello', (state.settings.name || '').trim());
+  } else h.textContent = view === 'tomorrow' ? t('helloTomorrow') : view === 'yesterday' ? t('helloYesterday') : t('hello', (state.settings.name || '').trim());
 }
 
 // ---------- a photo of the meal ----------
@@ -388,9 +397,9 @@ let firstTotals = true;
 
 function renderHead(swap) {
   const head = document.querySelector('.head');
-  const d = new Date(); if (view === 'tomorrow') d.setDate(d.getDate() + 1);
+  const d = new Date(); d.setDate(d.getDate() + (OFFSET[view] || 0));
   $('title').textContent = t(view);
-  $('dateline').textContent = view === 'weekly' ? t('thisWeek') : longDate(d);
+  $('dateline').textContent = view === 'weekly' ? t('weekHead') : longDate(d);
   $('eaten').hidden = view === 'weekly';
   if (swap) { head.classList.remove('swap'); void head.offsetWidth; head.classList.add('swap'); }
 }
@@ -689,10 +698,20 @@ document.addEventListener('keydown', ev => {
   }
 });
 
-// At midnight, Tomorrow's plan becomes Today's log (entries are stored by date).
+// At midnight, Tomorrow's plan becomes Today's log (entries are stored by date). The day is checked
+// the moment Windy comes back to the screen (a phone waking up in the morning) and every 15 seconds,
+// so it never keeps showing yesterday as "Today".
 let lastDay = dayKey(0);
+function checkDay() {
+  if (dayKey(0) === lastDay) return;
+  lastDay = dayKey(0); firstTotals = true;
+  if (document.activeElement?.classList?.contains('txt')) document.activeElement.blur();
+  setView(view === 'tomorrow' ? 'today' : view, false);
+}
+setInterval(checkDay, 15000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkDay(); });
+addEventListener('focus', checkDay); addEventListener('pageshow', checkDay);
 setInterval(() => {
-  if (dayKey(0) !== lastDay) { lastDay = dayKey(0); firstTotals = true; setView(view === 'tomorrow' ? 'today' : view, false); }
   if (navigator.onLine !== false && !aiPaused() && [0, 1].some(o => list(dayKey(o)).some(e => e.status === 'waiting' || e.status === 'rough'))) resume();
 }, 120000);
 

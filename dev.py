@@ -214,7 +214,8 @@ class Handler(SimpleHTTPRequestHandler):
                     "foods": [str(f)[:120] for f in (d.get("foods") or [])[:30]],
                 } for d in days],
             }
-            text = self.gemini(key, spec, spec["summary_system"], json.dumps(payload, ensure_ascii=False), {"temperature": 0.6, "thinkingConfig": {"thinkingBudget": 0}})
+            system = spec["coach_system"] if body.get("style") == "coach" else spec["note_system"] if body.get("style") == "note" else spec["summary_system"]
+            text = self.gemini(key, spec, system, json.dumps(payload, ensure_ascii=False), {"temperature": 0.6, "thinkingConfig": {"thinkingBudget": 0}})
             if text is None:
                 return
             if not text.strip():

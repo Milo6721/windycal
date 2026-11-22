@@ -8,7 +8,7 @@ import { t, num, locale, getLang, longDate } from './i18n.js';
 import { targets } from './goal.js';
 import { Spring, countTo, sfx, toast } from './fx.js';
 import { icon, MACROS } from './icons.js';
-import { waterOf, waterGoal, waterOn, setWater, amount } from './water.js';
+import { waterOf, waterGoal, waterOn, setWater, ml, glassSVG, lastPour } from './water.js';
 
 const WIND_UP = '<svg class="pan-wind" viewBox="0 0 640 60" preserveAspectRatio="none" aria-hidden="true"><path pathLength="100" d="M-20 16h380c40 0 60-12 100-12s60 14 200 8"/><path pathLength="100" d="M-20 32h260c50 0 70 12 120 12s90-16 300-8"/><path pathLength="100" d="M-20 48h440c30 0 50-10 80-10s50 8 160 6"/></svg>';
 const PAGES = ['sDay', 'sWeek', 'sMonth'];
@@ -62,9 +62,13 @@ function renderDay(sec, animate) {
       </div>
     </div>
     <div class="s-times">${Object.entries(times).map(([k, v]) => `<div><span>${t(k)}</span><b><i data-n="${Math.round(v)}">0</i> kcal</b><u><s style="transform:scaleX(${v / tmax})"></s></u></div>`).join('')}</div>
-    ${waterOn() ? (() => { const w = waterOf(curKey()), g = waterGoal(); return `<div class="s-water"><span class="sw-l">${t('water')}</span>
-      <div class="sw-glasses">${Array.from({ length: Math.max(g, w) }, (_, i) => `<button type="button" class="${i < w ? 'on' : ''}" data-g="${i + 1}" aria-label="${i + 1}"><i></i></button>`).join('')}</div>
-      <span class="sw-n">${w} / ${g} · ${amount(w)}</span></div>`; })() : ''}
+    ${waterOn() ? (() => {
+      const k = curKey(), w = waterOf(k), g = waterGoal(), fresh = lastPour.k === k && Date.now() - lastPour.at < 900;
+      return `<div class="s-water"><div class="sw-top"><span class="sw-l">${t('water')}</span><span class="sw-n"><b>${ml(w)}</b> / ${ml(g)}</span></div>
+      <div class="sw-glasses">${Array.from({ length: Math.max(g, w) }, (_, i) => {
+        const filling = fresh && i >= lastPour.from && i < lastPour.to, emptying = fresh && i >= lastPour.to && i < lastPour.from;
+        return `<button type="button" data-g="${i + 1}" aria-label="${ml(i + 1)}">${glassSVG(i < w ? 1 : 0, filling ? 'pour' : emptying ? 'drain' : '')}</button>`;
+      }).join('')}</div></div>`; })() : ''}
     <p class="s-note">${over ? t('over', num(tot.kcal - T.kcal)) : t('left', num(T.kcal - tot.kcal))}<span></span></p>`;
   sec.querySelectorAll('.sw-glasses button').forEach(b => b.addEventListener('click', () => { const g = +b.dataset.g, w = waterOf(curKey()); setWater(curKey(), g === w ? g - 1 : g); }));
   if (biggest) sec.querySelector('.s-note span').textContent = ` · ${t('biggest')}: ${biggest.text} (${num(biggest.k)} kcal)`;
