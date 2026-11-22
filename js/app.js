@@ -5,20 +5,41 @@ import { targets } from './goal.js';
 import { Spring, countTo, sfx, setSound, toast } from './fx.js';
 import { initSettings, openSettings, closeSettings, settingsOpen } from './settings.js';
 import { renderWeekly } from './weekly.js';
+import { enableSwipe } from './swipe.js';
 import { initSummary, refreshSummary, closeSummary, summaryOpen } from './summary.js';
 import { icon, MACROS } from './icons.js';
+import { initWater, paintWater } from './water.js';
+import { initTip, renderTip } from './tip.js';
+import { initSync } from './sync.js';
 
 const $ = id => document.getElementById(id);
 const KEY = 'windy.v1';
 const RING = 125.66;
 const SPARK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 3c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z"/><path d="M18.5 14c.3 2.3 1.2 3.2 3.5 3.5-2.3.3-3.2 1.2-3.5 3.5-.3-2.3-1.2-3.2-3.5-3.5 2.3-.3 3.2-1.2 3.5-3.5z" opacity=".55"/></svg>';
+const CAM = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.7l1.3-2h5l1.3 2h1.7A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.5" r="3.4"/></svg>';
 const MIC = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/></svg>';
 
 // ---------- state ----------
 export const state = { days: {}, settings: {} };
 try { Object.assign(state, JSON.parse(localStorage.getItem(KEY) || '{}')); } catch {}
 state.days = state.days || {}; state.settings = state.settings || {};
-export const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
+state.dayMod = state.dayMod || {}; state.water = state.water || {};
+// Each save notes which days (and whether the settings) actually changed, and when.
+// Sync uses these times to keep the newest version of each day on every device.
+const seen = {};
+for (const k in state.days) seen[k] = JSON.stringify(state.days[k]);
+let seenSettings = JSON.stringify(state.settings);
+export function save(opts = {}) {
+  const now = Date.now();
+  for (const k in state.days) {
+    const j = JSON.stringify(state.days[k]);
+    if (seen[k] !== j) { if (!opts.fromSync) state.dayMod[k] = now; seen[k] = j; }
+  }
+  const sj = JSON.stringify(state.settings);
+  if (sj !== seenSettings) { if (!opts.fromSync) state.settingsMod = now; seenSettings = sj; }
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+  if (!opts.fromSync) dispatchEvent(new Event('windy:saved'));
+}
 
 let view = 'today';
 const pad = n => String(n).padStart(2, '0');
@@ -41,7 +62,7 @@ export function totalsOf(entries) {
 const UNDO = [], REDO = [];
 const snap = () => JSON.stringify(state.days);
 function pushUndo() { UNDO.push(snap()); if (UNDO.length > 60) UNDO.shift(); REDO.length = 0; }
-function restore(s) { state.days = JSON.parse(s); save(); renderLog(); renderTotals(); resume(); }
+function restore(s) { state.days = JSON.parse(s); save(); renderLog(); refreshAll(); resume(); }
 function undo() {
   if (!UNDO.length) return toast(t('nothingUndo'));
   REDO.push(snap()); restore(UNDO.pop()); sfx('pop');
@@ -66,6 +87,7 @@ function makeRow(e) {
       <textarea class="txt" rows="1" spellcheck="false" autocomplete="off" autocapitalize="off" enterkeyhint="done"></textarea>
       <div class="sub"><i class="dot"></i><span></span></div>
       <button class="mic" type="button">${MIC}</button>
+      <button class="cam" type="button">${CAM}</button>
       <button class="x" type="button" tabindex="-1"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <button class="r" type="button" tabindex="-1">
@@ -78,6 +100,9 @@ function makeRow(e) {
   ta.value = e ? e.text : '';
   ta.placeholder = e ? '' : t(view === 'tomorrow' ? 'placeholderTomorrow' : 'placeholder');
   row.querySelector('.mic').title = t('dictate');
+  const cam = row.querySelector('.cam'); cam.title = t('takePhoto'); cam.setAttribute('aria-label', t('takePhoto'));
+  cam.addEventListener('click', () => pickPhoto());
+  row.classList.toggle('no-cam', state.settings.photos === false);
 
   ta.addEventListener('input', () => {
     fit(ta); updateHint();
@@ -180,9 +205,14 @@ function paint(row, animate) {
   row.classList.toggle('thinking', e.status === 'pending');
   row.classList.toggle('waiting', e.status === 'waiting');
   row.classList.toggle('unknown', e.status === 'unknown');
-  row.classList.toggle('has-sub', has && e.status !== 'pending');
-  row.querySelector('.state span').textContent = e.status === 'pending' && e.deep ? t('thinkingMore') : t(e.status === 'waiting' ? (['no_key', 'bad_key', 'rate_limited', 'offline'].includes(e.why) ? 'why_' + e.why : 'waiting') : e.status === 'unknown' ? 'unknown' : 'estimating');
-  if (!has) return;
+  row.classList.toggle('has-sub', (has && e.status !== 'pending') || !!e.photo);
+  row.querySelector('.state span').textContent = e.status === 'pending' && e.deep ? t('thinkingMore') : t(e.status === 'waiting' ? (['no_key', 'bad_key', 'rate_limited', 'offline', 'photo'].includes(e.why) ? 'why_' + e.why : 'waiting') : e.status === 'unknown' ? 'unknown' : 'estimating');
+  const sub = row.querySelector('.sub');
+  let th = sub.querySelector('img');
+  if (e.photo && !th) { th = document.createElement('img'); th.className = 'thumb'; th.alt = ''; sub.prepend(th); }
+  if (th) { if (e.photo) th.src = e.photo; else th.remove(); }
+  if (!has) { if (e.photo) { sub.querySelector('.dot').hidden = true; sub.querySelector('span').textContent = ''; } return; }
+  sub.querySelector('.dot').hidden = false;
   const tot = totalsOf([e]);
   const grams = e.items.reduce((s, it) => s + (it.grams || 0), 0) * m;
   const rough = e.status === 'rough' || e.items.some(it => it.confidence === 'low');
@@ -230,7 +260,7 @@ function acceptSuggestion() { const d = draftRow(), s = suggestion(); if (!d || 
 function clearDay() {
   if (!list(curKey()).length) return;
   pushUndo(); state.days[curKey()] = [];
-  save(); renderLog(); renderTotals(); sfx('off');
+  save(); renderLog(); refreshAll(); sfx('off');
   toast(t('cleared'), { label: t('undo'), kbd: '⌘Z', run: undo });
 }
 function updateHint() {
@@ -243,6 +273,60 @@ function updateHint() {
     const b = document.createElement('button'); b.type = 'button'; b.textContent = `${t('sameAs')} ${s}`; b.onclick = acceptSuggestion;
     h.append(b, Object.assign(document.createElement('kbd'), { textContent: 'Tab' }));
   } else h.textContent = view === 'tomorrow' ? t('helloTomorrow') : t('hello', (state.settings.name || '').trim());
+}
+
+// ---------- a photo of the meal ----------
+// The photo is shrunk on this device (a small copy is all the AI needs), a tiny thumbnail
+// stays with the line, and the line reads "Photo of a meal" until the AI names what it sees.
+const photoInput = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*', hidden: true, id: 'photo-input' });
+photoInput.setAttribute('capture', 'environment');
+photoInput.addEventListener('change', () => { const f = photoInput.files[0]; photoInput.value = ''; if (f) addPhoto(f); });
+document.body.append(photoInput);
+function pickPhoto() { photoInput.click(); }
+function shrink(file, max, quality) {
+  return new Promise((ok, fail) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url); ok(c.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); fail(); };
+    img.src = url;
+  });
+}
+async function addPhoto(file) {
+  let big, thumb;
+  try { [big, thumb] = await Promise.all([shrink(file, 1024, 0.8), shrink(file, 96, 0.7)]); } catch { return toast(t('photoFail')); }
+  pushUndo();
+  const e = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text: t('photoMeal'), photo: thumb, fromPhoto: true, ts: Date.now(), status: 'pending', items: [], mult: 1 };
+  list(curKey()).push(e);
+  save(); renderLog(); refreshAll(); sfx('pop');
+  estimatePhoto(e, big.split(',')[1]);
+}
+async function estimatePhoto(e, data) {
+  const tok = (tokens.get(e.id) || 0) + 1; tokens.set(e.id, tok);
+  let res = null, why = 'unreachable';
+  try {
+    const r = await fetch('/api/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: { data, mime: 'image/jpeg' }, lang: getLang() }), signal: AbortSignal.timeout(30000) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && Array.isArray(j.items)) res = j; else why = j.error || 'upstream';
+  } catch {}
+  const live = locate(e.id);
+  if (!live || tokens.get(e.id) !== tok) return;
+  const row = rows.get(e.id);
+  if (res) {
+    live.items = res.is_food === false ? [] : res.items.map(it => ({ ...it, calories: +it.calories || 0, protein: +it.protein || 0, carbs: +it.carbs || 0, fat: +it.fat || 0, grams: +it.grams || 0 }));
+    live.status = live.items.length ? 'done' : 'unknown';
+    if (live.text === t('photoMeal') && (res.meal || live.items.length)) live.text = res.meal || live.items.map(it => it.name).join(', ');
+    if (row) { row.querySelector('.txt').value = live.text; fit(row.querySelector('.txt')); }
+    sfx('land');
+  } else { live.status = 'waiting'; live.why = why; }
+  save();
+  if (row) { paint(row, true); if (live.items.length) { row.classList.remove('landed'); void row.offsetWidth; row.classList.add('landed'); } }
+  refreshAll(); paintDetail(true);
 }
 
 // ---------- dictation ----------
@@ -273,7 +357,27 @@ function renderHead(swap) {
   if (swap) { head.classList.remove('swap'); void head.offsetWidth; head.classList.add('swap'); }
 }
 
+// After anything is added, changed or deleted: the bar, the heading, the open summary panels
+// and the Weekly view all show the new numbers.
+export function refreshAll() {
+  if (view === 'weekly') { renderWeekly($('weekly')); refreshSummary(); }
+  else renderTotals();
+}
+// Removes one entry from any day (used by the Weekly list), with undo.
+export function removeEntry(id, node) {
+  const k = Object.keys(state.days).find(x => state.days[x].some(e => e.id === id)); if (!k) return;
+  pushUndo();
+  state.days[k] = state.days[k].filter(e => e.id !== id);
+  rows.delete(id); tokens.delete(id);
+  save(); sfx('off');
+  const done = () => { if (view !== 'weekly') renderLog(); refreshAll(); };
+  if (node) { node.style.height = node.offsetHeight + 'px'; node.classList.add('out'); requestAnimationFrame(() => { node.style.height = '0'; node.style.paddingTop = node.style.paddingBottom = '0'; }); setTimeout(done, 300); }
+  else done();
+  toast(t('removed'), { label: t('undo'), kbd: '⌘Z', run: undo });
+}
+
 export function renderTotals() {
+  paintWater(false);
   if (view === 'weekly') return;
   refreshSummary();
   const instant = firstTotals; firstTotals = false;
@@ -310,6 +414,7 @@ function setView(v, swap = true) {
   renderHead(swap);
   if (v === 'weekly') renderWeekly($('weekly'));
   else { renderLog(); renderTotals(); }
+  renderTip(v);
   $('scroll').scrollTop = 0;
 }
 
@@ -332,6 +437,7 @@ export function applySettings() {
 // Entries left unfinished (reload mid-request, offline guesses) get another try.
 function resume() {
   for (const off of [0, 1]) for (const e of list(dayKey(off))) {
+    if (e.fromPhoto && e.text === t('photoMeal') && !e.items?.length) { if (e.status === 'pending') { e.status = 'waiting'; e.why = 'photo'; save({ fromSync: true }); } continue; }
     if (e.status === 'pending') estimate(e);
     else if (e.status === 'rough' || e.status === 'waiting') estimate(e, true);
   }
@@ -358,6 +464,7 @@ function buildDetail() {
   card.innerHTML = `
     <div class="d-head"><div class="d-k"><b>0</b><small>kcal</small></div><button type="button" class="d-close" aria-label="${t('close')}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     <p class="d-name"></p>
+    <img class="d-photo" alt="" hidden>
     <div class="d-wave"></div>
     <div class="d-bar">${MACROS.map(k => `<i class="bg-${k}"></i>`).join('')}</div>
     <div class="d-macs">${MACROS.map(k => `<div class="d-mac m-${k}"><span class="ic">${icon(k, 18)}</span><b><i>0</i> g</b><span class="lb">${t(k)}</span><em>0%</em></div>`).join('')}</div>
@@ -386,6 +493,7 @@ function paintDetail(landed = false, opening = false) {
   const has = e.items?.length > 0, m = e.mult || 1, tot = totalsOf([e]);
   const thinking = e.status === 'pending';
   card.classList.toggle('thinking', thinking); card.classList.toggle('empty', !has);
+  const ph = card.querySelector('.d-photo'); ph.hidden = !e.photo; if (e.photo) ph.src = e.photo;
   card.querySelector('.d-name').textContent = thinking ? (e.deep ? t('thinkingMore') : t('estimating')) : e.text;
   const quick = !opening && !landed;
   countTo(card.querySelector('.d-k b'), tot.kcal, num, quick, 700);
@@ -549,7 +657,16 @@ setInterval(() => {
 
 initSettings();
 initSummary();
+initWater();
+initTip(() => view);
+// another device changed something: show it
+addEventListener('windy:synced', () => { if (!document.activeElement?.classList?.contains('txt')) applySettings(); else refreshAll(); });
+addEventListener('windy:joined', () => toast(t('syncJoined')));
+// swipe a line to the left to delete it, in the log and in the Weekly day list
+enableSwipe($('log'), '.row:not(.draft):not(.out)', row => { clearTimeout(row._t); row.querySelector('.txt').value = ''; commit(row); }, () => t('mDelete'));
+enableSwipe($('weekly'), '.wk-item', item => removeEntry(item.dataset.id, item), () => t('mDelete'));
 applySettings();
 resume();
+initSync();
 document.fonts?.ready.then(() => { movePill(); fitAll(); });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});

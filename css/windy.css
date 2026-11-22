@@ -634,3 +634,87 @@ body.pulling .pan-up { transition: none; }
 .ai-dots { width: 6px; height: 6px; border-radius: 50%; background: var(--w1); animation: aipulse 1.1s ease-in-out infinite; flex: none; }
 @keyframes aipulse { 50% { transform: scale(1.6); opacity: .4; } }
 .ai-text .ai-detail { display: block; }
+
+/* ---------- swipe left to delete ---------- */
+.row, .wk-item { position: relative; touch-action: pan-y; }
+.swipe-bg { position: absolute; inset: 1px -12px; z-index: 0; border-radius: 14px; pointer-events: none; opacity: 0;
+  background: linear-gradient(90deg, #E9796F, #DE5A50); color: #fff;
+  display: flex; align-items: center; justify-content: flex-end; padding-right: 18px;
+  clip-path: inset(0 0 0 max(0px, calc(100% - 12px + var(--sx, 0px))) round 14px);
+  transition: opacity .3s, clip-path .45s var(--spring); }
+:root[data-mode="dark"] .swipe-bg { background: linear-gradient(90deg, #C9665E, #B8463D); }
+.swipe-bg span { display: flex; align-items: center; gap: 7px; font: 600 13px/1 var(--ui); transform: scale(.82); opacity: .85; transition: transform .35s cubic-bezier(.2, 1.6, .4, 1), opacity .2s; }
+.row.armed .swipe-bg span, .wk-item.armed .swipe-bg span { transform: scale(1.12); opacity: 1; }
+.row > .l, .row > .r, .wk-item > span { position: relative; z-index: 1; transform: translateX(var(--sx, 0px)); transition: transform .45s var(--spring); }
+.row.swiping > .l, .row.swiping > .r, .wk-item.swiping > span, .row.swiping .swipe-bg, .wk-item.swiping .swipe-bg { transition: none; }
+.row.swiped > .l, .row.swiped > .r, .wk-item.swiped > span { transition: transform .24s cubic-bezier(.5, 0, .9, .4); }
+.row.swiped .swipe-bg, .wk-item.swiped .swipe-bg { clip-path: inset(0 round 14px); transition: clip-path .24s ease-in; }
+.row.swiped .swipe-bg span, .wk-item.swiped .swipe-bg span { transform: translateX(-30px) scale(1.12); }
+.wk-item.out { overflow: hidden; opacity: 0; transition: height .3s var(--spring), padding .3s, opacity .25s; }
+body.swipe-lock, body.swipe-lock * { user-select: none !important; -webkit-user-select: none !important; cursor: grabbing !important; }
+
+/* ---------- water: a drop in the bar that fills with a little wave ---------- */
+.water { --fill: 0; flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; border: 0; background: none; padding: 2px 4px; margin: 0 -6px; border-radius: 12px; cursor: pointer; color: var(--ink); -webkit-tap-highlight-color: transparent; transition: background .2s, transform .3s var(--spring-soft); }
+.water:hover { background: rgba(127, 127, 127, .08); }
+.water:active { transform: scale(.92); }
+.water svg { width: 24px; height: 30px; overflow: visible; }
+.water .drop { fill: none; stroke: #6FA8DC; stroke-width: 1.6; }
+.water .wave { fill: #8EC3EC; transform: translateY(calc(25.5px - max(var(--fill), .06) * 23px)); transition: transform .9s var(--spring); animation: wavex 2.4s linear infinite; }
+:root[data-mode="dark"] .water .wave { fill: #5F9CD3; } :root[data-mode="dark"] .water .drop { stroke: #7DB4E6; }
+@keyframes wavex { from { translate: 0 0; } to { translate: 24px 0; } }
+.water b { font: 600 11px/1 var(--ui); color: var(--soft); font-variant-numeric: tabular-nums; }
+.water.full b { color: #4E8FCB; }
+.water.splash svg { animation: splash .6s var(--spring-soft); }
+@keyframes splash { 0% { transform: scale(1); } 30% { transform: scale(1.18) translateY(-2px); } 100% { transform: scale(1); } }
+.bar > .water { transform: translateX(var(--slide, 0)); opacity: var(--fade, 1); filter: blur(var(--blur, 0px)); }
+@media (max-width: 420px) { .water svg { width: 20px; height: 25px; } .water b { font-size: 10px; } .b-right { gap: 10px; } }
+.s-water { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(127, 127, 127, .14); }
+.sw-l { font-size: 12px; color: var(--soft); }
+.sw-n { font-size: 12px; color: var(--soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sw-glasses { display: flex; flex-wrap: wrap; gap: 4px; }
+.sw-glasses button { width: 18px; height: 22px; border: 0; padding: 0; background: none; cursor: pointer; }
+.sw-glasses i { display: block; width: 100%; height: 100%; border-radius: 3px 3px 6px 6px; box-shadow: inset 0 0 0 1.5px #9CC6EA; transition: background .3s, transform .3s var(--spring-soft); }
+.sw-glasses button.on i { background: #8EC3EC; box-shadow: none; }
+.sw-glasses button:active i { transform: scale(.85); }
+
+/* ---------- meal photos ---------- */
+.cam { position: absolute; z-index: 3; right: 34px; top: -3px; width: 30px; height: 30px; border: 0; border-radius: 9px; background: none; color: var(--faint); cursor: pointer; display: none; place-items: center; transition: background .2s, color .2s; }
+.row.draft .cam { display: grid; }
+.row.draft.no-cam .cam { display: none; }
+.cam:hover { background: var(--chip); color: var(--ink); }
+.sub .thumb { width: 18px; height: 18px; border-radius: 5px; object-fit: cover; flex: none; box-shadow: 0 0 0 .5px rgba(0, 0, 0, .1); }
+.d-photo { display: block; width: 100%; height: 132px; object-fit: cover; border-radius: 14px; margin-top: 12px; image-rendering: auto; filter: saturate(1.05); }
+
+/* ---------- the morning tip ---------- */
+.tip { display: inline-flex; align-items: flex-start; gap: 8px; max-width: min(520px, 100%); margin: 16px auto 0 !important; padding: 10px 12px 10px 14px; border-radius: 16px;
+  background: var(--green-soft); color: var(--green) !important; text-align: left; font: 400 14.5px/1.45 var(--serif) !important; }
+:root[data-mode="dark"] .tip { color: #8FD6B4 !important; }
+.tip i { flex: none; margin-top: 3px; }
+.tip button { flex: none; width: 20px; height: 20px; margin: 1px -2px 0 2px; border: 0; border-radius: 50%; background: none; color: inherit; opacity: .55; cursor: pointer; display: grid; place-items: center; }
+.tip button:hover { opacity: 1; background: rgba(127, 127, 127, .12); }
+.tip.in { animation: tipin .6s var(--spring-soft) both; }
+.tip.bye { animation: tipout .26s ease-in both; }
+@keyframes tipin { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+@keyframes tipout { to { opacity: 0; transform: translateY(-6px) scale(.97); } }
+
+/* ---------- sync in Settings ---------- */
+.grp.sync { padding: 14px; }
+.sync-p { margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: var(--soft); }
+.sync-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill-btn { border: 0; border-radius: 10px; padding: 9px 14px; background: var(--green); color: #fff; font: 600 13px/1 var(--ui); cursor: pointer; transition: transform .25s var(--spring-soft), filter .2s; }
+.pill-btn:hover { filter: brightness(1.05); } .pill-btn:active { transform: scale(.97); }
+.ghostbtn.danger { color: #D5584F; }
+.sync-join { display: flex; gap: 8px; margin-top: 12px; }
+.sync-join input { flex: 1; min-width: 0; border: 0; border-radius: 10px; padding: 9px 11px; font: 600 13.5px/1.2 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .04em; color: var(--ink); background: var(--card); box-shadow: inset 0 0 0 1px rgba(127, 127, 127, .2); outline: 0; text-transform: uppercase; }
+.sync-join input:focus { box-shadow: inset 0 0 0 1.5px var(--green), 0 0 0 4px var(--green-soft); }
+.sync-join input.bad { box-shadow: inset 0 0 0 1.5px #D5584F; animation: shake .35s; }
+@keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.sync-code { display: flex; flex-direction: column; gap: 4px; }
+.sync-code span { font-size: 12px; color: var(--soft); }
+.sync-code b { font: 650 19px/1.2 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .06em; user-select: all; -webkit-user-select: all; }
+.sync-st { display: flex; align-items: center; gap: 7px; margin: 8px 0 12px; font-size: 12.5px; color: var(--soft); }
+.sync-st i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.sync-st.syncing i { animation: aipulse 1s ease-in-out infinite; }
+.sync-st.error i, .sync-st.no_store i { background: #D5584F; } .sync-st.offline i { background: var(--faint); }
+.grp.sync .fine { margin: 12px 0 0; }
+@media (max-width: 420px) { .bar { gap: 8px; } .water { margin: 0 0 0 2px; } .b-kcal .small { font-size: 11px; } }

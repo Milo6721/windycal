@@ -22,9 +22,21 @@ To use the real AI locally, copy `.env.example` to `.env.local` and paste your k
 The key lives only in Vercel. The browser talks to `/api/estimate`, never to Gemini directly.
 To try another model, add a `GEMINI_MODEL` variable (default is in `lib/spec.json`).
 
+## Set up sync between phone and computer (once)
+
+Sync keeps a locked copy of your data on the server; only your devices can open it (it is encrypted with your sync code before it leaves the device).
+
+1. In Vercel, open your project → **Storage** → **Create Database** → choose **Upstash for Redis** (free plan is plenty) → **Create**.
+2. When asked, **Connect** it to this project (all environments). Vercel adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`) by itself.
+3. **Deployments → Redeploy**.
+4. In Windy on your computer: **Settings → Sync between devices → Turn on sync → Copy link for your other device**, then open that link on your phone. Or type the code on the phone and tap **Join**.
+
+Without the database, Settings says "Sync needs a database on the server first".
+
 ## Files
 
 - `index.html`, `css/windy.css`, `js/*.js`: the site
-- `api/estimate.js`: the only serverless function (Gemini): food estimates and the AI summary
+- `api/estimate.js`: Gemini: food estimates (text and photos), the AI summary and the morning tip
+- `api/sync.js`: stores the encrypted sync box in Upstash Redis
 - `lib/spec.json`: the prompt and JSON schema, shared by the function and `dev.py`
 - `sw.js`, `manifest.webmanifest`, `icons/`: installable, works offline

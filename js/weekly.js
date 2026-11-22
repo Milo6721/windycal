@@ -41,7 +41,7 @@ export function renderWeekly(root) {
     const withFood = x.entries.filter(e => e.text);
     if (!withFood.length) box.insertAdjacentHTML('beforeend', `<p class="wk-empty">${t('noEntries')}</p>`);
     for (const e of withFood) {
-      const row = document.createElement('div'); row.className = 'wk-item';
+      const row = document.createElement('div'); row.className = 'wk-item'; row.dataset.id = e.id;
       const a = document.createElement('span'), b = document.createElement('span');
       a.textContent = e.text; b.textContent = e.items?.length ? `${num(totalsOf([e]).kcal)} kcal` : '';
       row.append(a, b); box.append(row);

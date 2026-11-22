@@ -3,6 +3,8 @@
 // One function, two jobs:
 //   { text }                     → nutrition estimate for one line ({ text, deep: true } thinks longer)
 //   { summary: { scope, ... } }  → a few kind sentences about how you are eating
+//   { image: { data, mime }, lang } → nutrition estimate from a photo of a meal
+//   { tip: { ... } }             → one short tip for this morning, based on yesterday
 import { createRequire } from "node:module";
 
 const spec = createRequire(import.meta.url)("../lib/spec.json");
@@ -19,7 +21,10 @@ export default async function handler(req, res) {
   if (!key) return res.status(503).json({ error: "no_key" });
   const body = (typeof req.body === "string" ? safeParse(req.body) : req.body) || {};
   res.setHeader("Cache-Control", "no-store");
-  return body.summary ? summary(key, body.summary, res) : estimate(key, body, res);
+  if (body.summary) return summary(key, body.summary, res);
+  if (body.tip) return tip(key, body.tip, res);
+  if (body.image) return photo(key, body, res);
+  return estimate(key, body, res);
 }
 
 async function estimate(key, body, res) {
@@ -40,7 +45,43 @@ async function estimate(key, body, res) {
   return res.status(200).json({ is_food: data.is_food !== false, items: data.items });
 }
 
+async function photo(key, body, res) {
+  const img = body.image || {};
+  const mime = /^image\/(jpeg|png|webp|heic|heif)$/.test(img.mime) ? img.mime : "image/jpeg";
+  const data = String(img.data || "");
+  if (!data || data.length > 4_000_000 || !/^[A-Za-z0-9+/=]+$/.test(data)) return res.status(400).json({ error: "bad_image" });
+  const language = body.lang === "pl" ? "Polish" : "American English";
+  const out = await gemini(key, spec.models_fast, spec.system + spec.photo_extra, [
+    { inlineData: { mimeType: mime, data } },
+    { text: `Estimate this meal. Write names, portions and the meal description in ${language}.` },
+  ], {
+    responseMimeType: "application/json",
+    responseSchema: spec.schema,
+    temperature: 0.2,
+    thinkingConfig: { thinkingBudget: 0 },
+  });
+  if (out.error) return res.status(out.status).json({ error: out.error, detail: out.detail });
+  const result = safeParse(out.text || "");
+  if (!result || !Array.isArray(result.items)) return res.status(502).json({ error: "bad_output" });
+  return res.status(200).json({ is_food: result.is_food !== false, items: result.items, meal: String(result.meal || "").slice(0, 120) });
+}
+
 const n = (v) => Math.max(0, Math.min(100000, Math.round(+v || 0)));
+async function tip(key, s, res) {
+  const y = s.yesterday || {};
+  if (!Array.isArray(y.foods) || !y.foods.length) return res.status(400).json({ error: "empty" });
+  const g = s.goal || {};
+  const payload = {
+    language: s.lang === "pl" ? "Polish" : "American English",
+    goal: { kcal: n(g.kcal), protein: n(g.protein), carbs: n(g.carbs), fat: n(g.fat), water_glasses: n(g.water) },
+    yesterday: { kcal: n(y.kcal), protein: n(y.protein), carbs: n(y.carbs), fat: n(y.fat), water_glasses: n(y.water),
+      foods: y.foods.slice(0, 30).map((f) => String(f).slice(0, 120)) },
+  };
+  const out = await gemini(key, spec.models_fast, spec.tip_system, JSON.stringify(payload), { temperature: 0.7, thinkingConfig: { thinkingBudget: 0 } });
+  if (out.error) return res.status(out.status).json({ error: out.error, detail: out.detail });
+  if (!out.text.trim()) return res.status(502).json({ error: "bad_output" });
+  return res.status(200).json({ text: out.text.trim().slice(0, 300) });
+}
 async function summary(key, s, res) {
   const days = Array.isArray(s.days) ? s.days.slice(0, 31) : [];
   if (!days.length) return res.status(400).json({ error: "empty" });
@@ -51,7 +92,7 @@ async function summary(key, s, res) {
     goal: { kcal: n(g.kcal), protein: n(g.protein), carbs: n(g.carbs), fat: n(g.fat) },
     days: days.map((d) => ({
       date: String(d.date || "").slice(0, 10),
-      kcal: n(d.kcal), protein: n(d.protein), carbs: n(d.carbs), fat: n(d.fat),
+      kcal: n(d.kcal), protein: n(d.protein), carbs: n(d.carbs), fat: n(d.fat), water_glasses: d.water_glasses == null ? undefined : n(d.water_glasses),
       foods: (Array.isArray(d.foods) ? d.foods : []).slice(0, 30).map((f) => String(f).slice(0, 120)),
     })),
   };
@@ -126,7 +167,7 @@ async function gemini(key, list, system, userText, generationConfig) {
           headers: { "Content-Type": "application/json", "x-goog-api-key": key },
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: system }] },
-            contents: [{ role: "user", parts: [{ text: userText }] }],
+            contents: [{ role: "user", parts: Array.isArray(userText) ? userText : [{ text: userText }] }],
             generationConfig: config,
           }),
           signal: AbortSignal.timeout(Math.max(3000, Math.min(9000, 17000 - (Date.now() - t0)))),

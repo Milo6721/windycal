@@ -8,6 +8,7 @@ import { t, num, locale, getLang, longDate } from './i18n.js';
 import { targets } from './goal.js';
 import { Spring, countTo, sfx, toast } from './fx.js';
 import { icon, MACROS } from './icons.js';
+import { waterOf, waterGoal, waterOn, setWater, amount } from './water.js';
 
 const WIND_UP = '<svg class="pan-wind" viewBox="0 0 640 60" preserveAspectRatio="none" aria-hidden="true"><path pathLength="100" d="M-20 16h380c40 0 60-12 100-12s60 14 200 8"/><path pathLength="100" d="M-20 32h260c50 0 70 12 120 12s90-16 300-8"/><path pathLength="100" d="M-20 48h440c30 0 50-10 80-10s50 8 160 6"/></svg>';
 const PAGES = ['sDay', 'sWeek', 'sMonth'];
@@ -61,7 +62,11 @@ function renderDay(sec, animate) {
       </div>
     </div>
     <div class="s-times">${Object.entries(times).map(([k, v]) => `<div><span>${t(k)}</span><b><i data-n="${Math.round(v)}">0</i> kcal</b><u><s style="transform:scaleX(${v / tmax})"></s></u></div>`).join('')}</div>
+    ${waterOn() ? (() => { const w = waterOf(curKey()), g = waterGoal(); return `<div class="s-water"><span class="sw-l">${t('water')}</span>
+      <div class="sw-glasses">${Array.from({ length: Math.max(g, w) }, (_, i) => `<button type="button" class="${i < w ? 'on' : ''}" data-g="${i + 1}" aria-label="${i + 1}"><i></i></button>`).join('')}</div>
+      <span class="sw-n">${w} / ${g} · ${amount(w)}</span></div>`; })() : ''}
     <p class="s-note">${over ? t('over', num(tot.kcal - T.kcal)) : t('left', num(T.kcal - tot.kcal))}<span></span></p>`;
+  sec.querySelectorAll('.sw-glasses button').forEach(b => b.addEventListener('click', () => { const g = +b.dataset.g, w = waterOf(curKey()); setWater(curKey(), g === w ? g - 1 : g); }));
   if (biggest) sec.querySelector('.s-note span').textContent = ` · ${t('biggest')}: ${biggest.text} (${num(biggest.k)} kcal)`;
   const fg = sec.querySelector('.ring-fg'), frac = Math.min(tot.kcal / T.kcal, 1);
   const sp = new Spring(x => { fg.style.strokeDashoffset = Math.max(0, C * (1 - x)); }, { stiffness: 90, damping: 12 });
@@ -119,7 +124,7 @@ function aiPayload(scope) {
   const T = targets(state.settings);
   return {
     scope, lang: getLang(), goal: { kcal: T.kcal, protein: T.protein, carbs: T.carbs, fat: T.fat },
-    days: aiDays(scope).map(x => ({ date: x.key, kcal: x.tot.kcal, protein: x.tot.protein, carbs: x.tot.carbs, fat: x.tot.fat,
+    days: aiDays(scope).map(x => ({ date: x.key, water_glasses: waterOn() ? waterOf(x.key) : undefined, kcal: x.tot.kcal, protein: x.tot.protein, carbs: x.tot.carbs, fat: x.tot.fat,
       foods: x.entries.filter(e => e.text).map(e => `${e.text} (${Math.round(totalsOf([e]).kcal)} kcal)`) })),
   };
 }
@@ -323,6 +328,7 @@ function makePanel(kind) {
 let drag = null;
 function onDown(ev) {
   if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+  if (ev.target.closest('.water, .s-water')) return;
   const src = ev.currentTarget === bar ? 'bar' : 'panel';
   if (src === 'panel' && ev.target.closest('.ai-seg')) return; // let text be selected and buttons pressed
   bar.classList.add('held');

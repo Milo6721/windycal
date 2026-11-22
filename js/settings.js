@@ -4,6 +4,8 @@ import { t, num } from './i18n.js';
 import { targets, cmToFtIn, ftInToCm, kgToLb, lbToKg } from './goal.js';
 import { sfx } from './fx.js';
 import { icon, MACROS } from './icons.js';
+import { syncInfo, onSyncChange, startSync, stopSync, syncNow, canJoin, syncLink } from './sync.js';
+import { paintWater } from './water.js';
 
 const sheet = () => document.getElementById('setsheet');
 const card = () => document.getElementById('setcard');
@@ -58,6 +60,14 @@ function render() {
     ${row(t('sound'), `<button type="button" class="switch ${s.sound !== false ? 'on' : ''}" data-act="sound" role="switch" aria-checked="${s.sound !== false}"><i></i></button>`)}
   </div></div>
 
+  <div class="sec"><h3>${t('extras')}</h3><div class="grp">
+    ${row(t('water'), `<button type="button" class="switch ${s.water !== false ? 'on' : ''}" data-act="water" role="switch" aria-checked="${s.water !== false}"><i></i></button>`, t('waterSub'))}
+    ${s.water !== false ? row(t('waterGoalLbl'), `<div class="num"><input type="number" inputmode="numeric" data-in="waterGoal" value="${s.waterGoal > 0 ? s.waterGoal : 8}" min="1" max="20"><i>${t('glasses')}</i></div>`) : ''}
+    ${row(t('photos'), `<button type="button" class="switch ${s.photos !== false ? 'on' : ''}" data-act="photos" role="switch" aria-checked="${s.photos !== false}"><i></i></button>`, t('photosSub'))}
+  </div></div>
+
+  <div class="sec" id="syncsec">${syncBox()}</div>
+
   <div class="sec"><h3>${t('shortcuts')}</h3>
     <div class="keys"><span><kbd>N</kbd> <kbd>/</kbd> ${t('kFocus')}</span><span><kbd>Enter</kbd> ${t('kEnter')}</span><span><kbd>⌘Z</kbd> ${t('kUndo')}</span><span><kbd>⇧⌘Z</kbd> ${t('kRedo')}</span><span><kbd>Tab</kbd> ${t('kTab')}</span><span><kbd>⌘,</kbd> ${t('kSet')}</span></div></div>
 
@@ -67,13 +77,51 @@ function render() {
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+// ---------- sync between devices ----------
+function ago(ms) {
+  const m = Math.round((Date.now() - ms) / 60000);
+  return m < 1 ? t('justNow') : m < 60 ? t('minAgo', m) : t('hAgo', Math.round(m / 60));
+}
+function syncBox() {
+  const x = syncInfo();
+  if (!x.on) return `<h3>${t('syncTitle')}</h3><div class="grp sync">
+    <p class="sync-p">${t('syncIntro')}</p>
+    <div class="sync-acts"><button type="button" class="pill-btn" data-act="sync-new">${t('syncStart')}</button></div>
+    <div class="sync-join"><input type="text" data-in="joincode" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="24"><button type="button" class="ghostbtn" data-act="sync-join">${t('syncJoin')}</button></div>
+  </div>`;
+  const st = x.status === 'syncing' ? t('syncing') : x.status === 'no_store' ? t('syncNoStore') : x.status === 'offline' ? t('syncOffline')
+    : x.status === 'error' ? t('syncError') : x.last ? t('syncedAgo', ago(x.last)) : t('syncing');
+  return `<h3>${t('syncTitle')}</h3><div class="grp sync">
+    <div class="sync-code"><span>${t('syncCode')}</span><b>${x.code}</b></div>
+    <p class="sync-st ${x.status}"><i></i>${st}</p>
+    <div class="sync-acts"><button type="button" class="pill-btn" data-act="sync-link">${t('syncCopyLink')}</button><button type="button" class="ghostbtn" data-act="sync-now">${t('syncNow')}</button><button type="button" class="ghostbtn danger" data-act="sync-off">${t('syncOff')}</button></div>
+    <p class="fine">${t('syncHow')}</p>
+  </div>`;
+}
+const paintSync = () => { const el = document.getElementById('syncsec'); if (el && settingsOpen()) el.innerHTML = syncBox(); };
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
+}
+
 export function initSettings() {
+  onSyncChange(paintSync);
   sheet().addEventListener('mousedown', ev => { if (ev.target === sheet()) closeSettings(); });
   card().addEventListener('click', ev => {
     const b = ev.target.closest('button'); if (!b) return;
     const s = state.settings;
     if (b.dataset.act === 'close') return closeSettings();
+    if (b.dataset.act === 'sync-new') { startSync(); paintSync(); sfx('pop'); return; }
+    if (b.dataset.act === 'sync-join') {
+      const v = card().querySelector('[data-in=joincode]').value;
+      if (!canJoin(v)) { card().querySelector('[data-in=joincode]').classList.add('bad'); return; }
+      startSync(v); paintSync(); sfx('pop'); return;
+    }
+    if (b.dataset.act === 'sync-now') { syncNow(); return; }
+    if (b.dataset.act === 'sync-off') { stopSync(); paintSync(); sfx('off'); return; }
+    if (b.dataset.act === 'sync-link') { copy(syncLink()).then(ok => { b.textContent = ok ? t('copied') : syncLink(); setTimeout(paintSync, 1800); }); return; }
     if (b.dataset.act === 'sound') s.sound = s.sound === false;
+    else if (b.dataset.act === 'water') s.water = s.water === false;
+    else if (b.dataset.act === 'photos') s.photos = s.photos === false;
     else if (b.dataset.act === 'reset') s.goalOverride = null;
     else if (b.dataset.set === 'sex' || b.dataset.set === 'goal') s.body = { ...(s.body || {}), [b.dataset.set]: b.dataset.v };
     else if (b.dataset.set) s[b.dataset.set] = b.dataset.v;
@@ -85,6 +133,8 @@ export function initSettings() {
     const el = ev.target, k = el.dataset.in; if (!k) return;
     const s = state.settings, body = { ...targets(s).body }, v = parseFloat(el.value);
     if (k === 'name') { s.name = el.value; save(); return; }
+    if (k === 'joincode') { el.classList.remove('bad'); return; }
+    if (k === 'waterGoal') { if (v >= 1 && v <= 20) { s.waterGoal = Math.round(v); save(); paintWater(false); } return; }
     if (k === 'goalOverride') s.goalOverride = v >= 800 && v <= 8000 ? Math.round(v) : null;
     else if (!isNaN(v)) {
       if (k === 'age') body.age = clamp(v, 14, 100);

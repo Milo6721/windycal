@@ -86,7 +86,7 @@ class Handler(SimpleHTTPRequestHandler):
             for step in range(3):
                 payload = {
                     "systemInstruction": {"parts": [{"text": system}]},
-                    "contents": [{"role": "user", "parts": [{"text": text}]}],
+                    "contents": [{"role": "user", "parts": text if isinstance(text, list) else [{"text": text}]}],
                     "generationConfig": cfg,
                 }
                 req = urllib.request.Request(
@@ -128,7 +128,31 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(502, {"error": "upstream", "detail": (next((e for e in errors if " 404 " not in e), errors[0] if errors else "no model answered"))[:220]})
         return None
 
+    _boxes = {}  # local stand-in for the sync database: id -> (data, rev)
+
+    def sync(self):
+        """Same answers as api/sync.js, kept in memory while dev.py runs."""
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        except ValueError:
+            return self.send_json(400, {"error": "bad_json"})
+        box_id = str(body.get("id", ""))
+        if not (len(box_id) == 64 and all(c in "0123456789abcdef" for c in box_id)):
+            return self.send_json(400, {"error": "bad_id"})
+        data, rev = Handler._boxes.get(box_id, (None, "0"))
+        if body.get("op") == "get":
+            return self.send_json(200, {"data": data, "rev": rev})
+        if body.get("op") == "put":
+            if str(body.get("rev", "0")) != rev:
+                return self.send_json(409, {"error": "conflict", "rev": rev})
+            new_rev = str(int(rev) + 1)
+            Handler._boxes[box_id] = (str(body.get("data", "")), new_rev)
+            return self.send_json(200, {"ok": True, "rev": new_rev})
+        return self.send_json(400, {"error": "bad_op"})
+
     def do_POST(self):
+        if self.path == "/api/sync":
+            return self.sync()
         if self.path != "/api/estimate":
             return self.send_json(404, {"error": "not_found"})
         key = api_key()
@@ -139,6 +163,37 @@ class Handler(SimpleHTTPRequestHandler):
         except ValueError:
             return self.send_json(400, {"error": "bad_json"})
         spec = json.load(open(os.path.join(ROOT, "lib", "spec.json"), encoding="utf-8"))
+
+        num = lambda v: max(0, min(100000, int(round(float(v or 0)))))
+        if body.get("tip"):
+            tip = body["tip"]
+            y, g = tip.get("yesterday") or {}, tip.get("goal") or {}
+            if not y.get("foods"):
+                return self.send_json(400, {"error": "empty"})
+            payload = {
+                "language": "Polish" if tip.get("lang") == "pl" else "American English",
+                "goal": {k: num(g.get(k)) for k in ("kcal", "protein", "carbs", "fat", "water")},
+                "yesterday": {**{k: num(y.get(k)) for k in ("kcal", "protein", "carbs", "fat", "water")}, "foods": [str(f)[:120] for f in y["foods"][:30]]},
+            }
+            text = self.gemini(key, spec, spec["tip_system"], json.dumps(payload, ensure_ascii=False), {"temperature": 0.7, "thinkingConfig": {"thinkingBudget": 0}})
+            if text is None:
+                return
+            return self.send_json(200, {"text": text.strip()[:300]}) if text.strip() else self.send_json(502, {"error": "bad_output"})
+
+        if body.get("image"):
+            img = body["image"]
+            language = "Polish" if body.get("lang") == "pl" else "American English"
+            parts = [{"inlineData": {"mimeType": "image/jpeg", "data": str(img.get("data", ""))}},
+                     {"text": "Estimate this meal. Write names, portions and the meal description in %s." % language}]
+            out = self.gemini(key, spec, spec["system"] + spec["photo_extra"], parts, {
+                "responseMimeType": "application/json", "responseSchema": spec["schema"], "temperature": 0.2, "thinkingConfig": {"thinkingBudget": 0}})
+            if out is None:
+                return
+            try:
+                data = json.loads(out or "{}")
+            except ValueError:
+                return self.send_json(502, {"error": "bad_output"})
+            return self.send_json(200, {"is_food": data.get("is_food") is not False, "items": data.get("items", []), "meal": str(data.get("meal", ""))[:120]})
 
         if body.get("summary"):
             body = body["summary"]

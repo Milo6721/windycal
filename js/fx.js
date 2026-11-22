@@ -56,6 +56,7 @@ export function sfx(name) {
     const t = ctx.currentTime + 0.01;
     if (name === 'land') { tone(784, t, 0.22, 0.045); tone(1175, t + 0.07, 0.32, 0.035); }
     else if (name === 'pop') tone(620, t, 0.12, 0.04);
+    else if (name === 'drop') { tone(980, t, 0.09, 0.035); tone(1320, t + 0.05, 0.14, 0.03); }
     else if (name === 'off') tone(330, t, 0.16, 0.035);
   } catch {}
 }
