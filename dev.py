@@ -63,13 +63,18 @@ class Handler(SimpleHTTPRequestHandler):
             with urllib.request.urlopen(req, timeout=60) as r:
                 msg = json.load(r)
         except urllib.error.HTTPError as e:
-            sys.stderr.write("Gemini API %s: %s\n" % (e.code, e.read().decode(errors="replace")[:400]))
+            raw = e.read().decode(errors="replace")
+            try:
+                detail = str(json.loads(raw)["error"]["message"])[:300]
+            except Exception:
+                detail = raw[:300]
+            sys.stderr.write("Gemini API %s: %s\n" % (e.code, detail))
             if e.code == 429:
-                self.send_json(429, {"error": "rate_limited"})
-            elif e.code in (401, 403):
-                self.send_json(503, {"error": "bad_key"})
+                self.send_json(429, {"error": "rate_limited", "detail": detail})
+            elif e.code in (401, 403) or "api key" in detail.lower():
+                self.send_json(503, {"error": "bad_key", "detail": detail})
             else:
-                self.send_json(502, {"error": "upstream", "status": e.code})
+                self.send_json(502, {"error": "upstream", "detail": "%s: %s %s" % (model, e.code, detail)})
             return None
         except Exception as e:
             sys.stderr.write("Gemini API unreachable: %s\n" % e)
@@ -81,7 +86,7 @@ class Handler(SimpleHTTPRequestHandler):
         return "".join(p.get("text", "") for p in cands[0]["content"].get("parts", []) if not p.get("thought"))
 
     def do_POST(self):
-        if self.path not in ("/api/estimate", "/api/summary"):
+        if self.path != "/api/estimate":
             return self.send_json(404, {"error": "not_found"})
         key = api_key()
         if not key:
@@ -92,8 +97,9 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(400, {"error": "bad_json"})
         spec = json.load(open(os.path.join(ROOT, "lib", "spec.json"), encoding="utf-8"))
 
-        if self.path == "/api/summary":
-            days = (body.get("days") or [])[:7]
+        if body.get("summary"):
+            body = body["summary"]
+            days = (body.get("days") or [])[:31]
             if not days:
                 return self.send_json(400, {"error": "empty"})
             num = lambda v: max(0, min(100000, int(round(float(v or 0)))))
@@ -108,7 +114,7 @@ class Handler(SimpleHTTPRequestHandler):
                     "foods": [str(f)[:120] for f in (d.get("foods") or [])[:30]],
                 } for d in days],
             }
-            text = self.gemini(key, spec, spec["summary_system"], json.dumps(payload, ensure_ascii=False), {"temperature": 0.6})
+            text = self.gemini(key, spec, spec["summary_system"], json.dumps(payload, ensure_ascii=False), {"temperature": 0.6, "thinkingConfig": {"thinkingBudget": 1024}})
             if text is None:
                 return
             if not text.strip():
@@ -125,7 +131,7 @@ class Handler(SimpleHTTPRequestHandler):
             "responseMimeType": "application/json",
             "responseSchema": spec["schema"],
             "temperature": 0.2,
-            "thinkingConfig": {"thinkingBudget": -1 if deep else 0},
+            "thinkingConfig": {"thinkingBudget": 2048 if deep else 0},
         })
         if out is None:
             return

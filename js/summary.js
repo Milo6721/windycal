@@ -1,15 +1,21 @@
-// The day summary sheet. Tap the bar (or swipe it up) and it rises on a breeze:
-// Day, Week, Month and an AI read of how you are eating. Swipe sideways to move between them.
+// The summary bar unfolds three ways, following your finger the whole time:
+//   drag it up    → Day, Week and Month numbers
+//   drag it left  → a long strip across the page: the AI reads how you are eating
+//   drag it right → a long strip across the page: your trends as charts
+// Let go and it springs open or closed, depending on how far and how fast you pulled.
 import { state, totalsOf, keyOf, curKey } from './app.js';
 import { t, num, locale, getLang, longDate } from './i18n.js';
 import { targets } from './goal.js';
-import { Spring, countTo, sfx } from './fx.js';
+import { Spring, countTo, sfx, toast } from './fx.js';
 import { icon, MACROS } from './icons.js';
 
-const PAGES = ['sDay', 'sWeek', 'sMonth', 'sAI'];
-let el, track, bar, page = 0, open = false, aiBuilt = false;
-export const summaryOpen = () => open;
+const WIND_UP = '<svg class="pan-wind" viewBox="0 0 640 60" preserveAspectRatio="none" aria-hidden="true"><path pathLength="100" d="M-20 16h380c40 0 60-12 100-12s60 14 200 8"/><path pathLength="100" d="M-20 32h260c50 0 70 12 120 12s90-16 300-8"/><path pathLength="100" d="M-20 48h440c30 0 50-10 80-10s50 8 160 6"/></svg>';
+const PAGES = ['sDay', 'sWeek', 'sMonth'];
+let bar, panels = {}, openKind = null, progress = 0, page = 0;
+const springs = {};
+export const summaryOpen = () => !!openKind;
 
+// ---------- data ----------
 const lastDays = n => {
   const out = [];
   for (let off = -(n - 1); off <= 0; off++) {
@@ -19,16 +25,17 @@ const lastDays = n => {
   }
   return out;
 };
+const runCounts = (root, instant) => root.querySelectorAll('[data-n]').forEach(n => { if (!instant) n._n = 0; countTo(n, +n.dataset.n, num, instant, 800); });
 const stat = (value, label, suffix = '') => `<div class="stat"><b><i data-n="${Math.round(value)}">0</i>${suffix}</b><span>${label}</span></div>`;
 const bars = (days, goal, labels) => {
   const max = Math.max(goal * 1.2, ...days.map(x => x.tot.kcal));
   return `<div class="s-chart n${days.length}">
     <div class="goal-line" style="bottom:${(goal / max) * 100}%"><span>${t('goalWord')} ${num(goal)}</span></div>
     ${days.map((x, i) => `<div class="s-col ${x.tot.kcal > 0 ? 'has' : ''} ${x.tot.kcal > goal ? 'over' : ''}" title="${longDate(x.d)} · ${num(x.tot.kcal)} kcal"><i style="height:${x.tot.kcal > 0 ? Math.max((x.tot.kcal / max) * 100, 3) : 0}%;animation-delay:${i * (days.length > 10 ? 12 : 45)}ms"></i></div>`).join('')}
-  </div>${labels ? `<div class="s-x n${days.length}">${days.map(x => `<span>${x.d.toLocaleDateString(locale(), { weekday: 'narrow' })}</span>`).join('')}</div>` : ''}`;
+  </div>${labels ? `<div class="s-x">${days.map(x => `<span>${x.d.toLocaleDateString(locale(), { weekday: 'narrow' })}</span>`).join('')}</div>` : ''}`;
 };
-const runCounts = (root, instant) => root.querySelectorAll('[data-n]').forEach(n => { n._n = instant ? undefined : 0; countTo(n, +n.dataset.n, num, instant, 800); });
 
+// ---------- up: Day / Week / Month ----------
 function renderDay(sec, animate) {
   const T = targets(state.settings), entries = state.days[curKey()] || [], tot = totalsOf(entries);
   for (const k in tot) tot[k] = Math.round(tot[k]);
@@ -45,11 +52,11 @@ function renderDay(sec, animate) {
     <div class="s-day">
       <div class="s-ring ${over ? 'over' : ''}">
         <svg viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg" cx="60" cy="60" r="52" stroke-dasharray="${C}" stroke-dashoffset="${C}"/></svg>
-        <div class="s-ring-in"><b><i data-n="${Math.round(tot.kcal)}">0</i></b><span>${t('ofGoal', num(T.kcal))}</span></div>
+        <div class="s-ring-in"><b><i data-n="${tot.kcal}">0</i></b><span>${t('ofGoal', num(T.kcal))}</span></div>
       </div>
       <div class="s-macs">${MACROS.map(k => `
         <div class="s-mac m-${k}"><span class="ic">${icon(k, 18)}</span>
-          <div class="s-mac-t"><span>${t(k)}</span><b><i data-n="${Math.round(tot[k])}">0</i> / ${T[k]} g</b></div>
+          <div class="s-mac-t"><span>${t(k)}</span><b><i data-n="${tot[k]}">0</i> / ${T[k]} g</b></div>
           <u><s style="transform:scaleX(${Math.min(tot[k] / T[k], 1)})"></s></u></div>`).join('')}
       </div>
     </div>
@@ -61,7 +68,6 @@ function renderDay(sec, animate) {
   animate ? sp.set(frac) : sp.jump(frac);
   runCounts(sec, !animate);
 }
-
 function renderRange(sec, n, animate) {
   const T = targets(state.settings), days = lastDays(n), logged = days.filter(x => x.tot.kcal > 0), c = logged.length || 1;
   const total = logged.reduce((s, x) => s + x.tot.kcal, 0);
@@ -80,131 +86,294 @@ function renderRange(sec, n, animate) {
     ${logged.length ? '' : `<p class="s-note">${t('noWeek')}</p>`}`;
   runCounts(sec, !animate);
 }
-
-// ---------- AI read ----------
-function renderAI(sec) {
-  if (aiBuilt) return; aiBuilt = true;
-  sec.innerHTML = `
-    <div class="s-ai">
-      <div class="s-ai-btns"><button type="button" data-ai="day">${t('aiDay')}</button><button type="button" data-ai="week">${t('aiWeek')}</button></div>
-      <div class="s-ai-out"><p class="s-ai-hint">${t('aiHint')}</p></div>
-    </div>`;
-  sec.querySelectorAll('[data-ai]').forEach(b => b.addEventListener('click', () => askAI(sec, b.dataset.ai)));
+function goPage(i, animate = true) {
+  const el = panels.up, track = el.querySelector('.sum-track');
+  page = Math.max(0, Math.min(PAGES.length - 1, i));
+  el.querySelectorAll('.sum-tabs button').forEach((b, n) => b.classList.toggle('on', n === page));
+  const on = el.querySelector('.sum-tabs button.on'), pill = el.querySelector('.sum-tabs .pill');
+  if (on) { pill.style.width = on.offsetWidth + 'px'; pill.style.transform = `translateX(${on.offsetLeft}px)`; }
+  track.style.transform = `translateX(${-page * 100}%)`;
+  const sec = track.children[page];
+  if (page === 0) renderDay(sec, animate); else renderRange(sec, page === 1 ? 7 : 30, animate);
 }
-let aiRun = 0;
-async function askAI(sec, scope) {
-  const out = sec.querySelector('.s-ai-out'), run = ++aiRun;
-  const days = (scope === 'day' ? lastDays(1) : lastDays(7)).filter(x => x.entries.length);
-  const say = msg => { out.innerHTML = ''; out.append(Object.assign(document.createElement('p'), { className: 's-ai-hint', textContent: msg })); };
-  if (scope === 'day') { const k = curKey(); days.length = 0; const entries = state.days[k] || []; if (entries.length) days.push({ key: k, entries, tot: totalsOf(entries) }); }
-  if (!days.length) return say(t('aiEmpty'));
-  sec.querySelectorAll('[data-ai]').forEach(b => b.classList.toggle('on', b.dataset.ai === scope));
-  out.innerHTML = `<div class="ai-wave"></div><p class="s-ai-think">${t('aiThinking')}</p>`;
-  sfx('pop');
+
+// ---------- left: the AI read ----------
+let aiRun = 0, aiScope = 'day';
+const AI_KEY = 'windy.ai.v1';
+let aiCache = {};
+try { aiCache = JSON.parse(localStorage.getItem(AI_KEY) || '{}'); } catch {}
+function aiDays(scope) {
+  if (scope === 'day') { const k = curKey(), entries = state.days[k] || []; return entries.length ? [{ key: k, entries, tot: totalsOf(entries) }] : []; }
+  return lastDays(7).filter(x => x.entries.length);
+}
+function aiPayload(scope) {
   const T = targets(state.settings);
-  let text = '', why = 'unreachable';
-  try {
-    const r = await fetch('/api/summary', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        scope, lang: getLang(), goal: { kcal: T.kcal, protein: T.protein, carbs: T.carbs, fat: T.fat },
-        days: days.map(x => ({ date: x.key, kcal: x.tot.kcal, protein: x.tot.protein, carbs: x.tot.carbs, fat: x.tot.fat,
-          foods: x.entries.filter(e => e.text).map(e => `${e.text} (${Math.round(totalsOf([e]).kcal)} kcal)`) })),
-      }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (r.ok && j.text) text = j.text; else why = j.error || 'upstream';
-  } catch {}
-  if (run !== aiRun) return;
-  if (!text) return say(t(['no_key', 'bad_key', 'rate_limited'].includes(why) ? 'why_' + why : 'aiFail'));
-  out.innerHTML = '';
+  return {
+    scope, lang: getLang(), goal: { kcal: T.kcal, protein: T.protein, carbs: T.carbs, fat: T.fat },
+    days: aiDays(scope).map(x => ({ date: x.key, kcal: x.tot.kcal, protein: x.tot.protein, carbs: x.tot.carbs, fat: x.tot.fat,
+      foods: x.entries.filter(e => e.text).map(e => `${e.text} (${Math.round(totalsOf([e]).kcal)} kcal)`) })),
+  };
+}
+function aiSide() {
+  const T = targets(state.settings), week = lastDays(7);
+  const scopeDays = aiScope === 'day' ? lastDays(1) : week;
+  const tot = scopeDays.reduce((s, x) => { for (const k in s) s[k] += x.tot[k]; return s; }, { kcal: 0, protein: 0, carbs: 0, fat: 0 });
+  const kc = MACROS.map((k, i) => tot[k] * [4, 4, 9][i]), sum = kc.reduce((a, b) => a + b, 0) || 1;
+  return `${bars(week, T.kcal, false)}
+      <div class="ai-split">${MACROS.map((k, i) => `<i class="bg-${k}" style="flex-grow:${Math.max(kc[i], 0.0001)}"></i>`).join('')}</div>
+`;
+}
+function renderAI() {
+  const el = panels.ai.querySelector('.pan-c');
+  el.innerHTML = `
+    <div class="st-l"><div class="st-title"><span class="ai-spark">${SPARK}</span>${t('aiTitle')}</div>
+      <div class="bseg ai-seg"><button type="button" data-s="day" class="${aiScope === 'day' ? 'on' : ''}">${t('sDay')}</button><button type="button" data-s="week" class="${aiScope === 'week' ? 'on' : ''}">${t('sWeek')}</button></div></div>
+    <div class="s-ai-out"></div>
+    <div class="ai-side">${aiSide()}</div>`;
+  el.querySelectorAll('[data-s]').forEach(b => b.addEventListener('click', () => { if (aiScope !== b.dataset.s) { aiScope = b.dataset.s; sfx('pop'); renderAI(); askAI(); } }));
+  const cached = aiCache[aiScope];
+  if (cached && cached.key === JSON.stringify(aiPayload(aiScope))) showText(cached.text, false);
+  else el.querySelector('.s-ai-out').innerHTML = `<p class="s-ai-hint">${t('aiHint')}</p>`;
+}
+const SPARK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 3c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z"/><path d="M18.5 14c.3 2.3 1.2 3.2 3.5 3.5-2.3.3-3.2 1.2-3.5 3.5-.3-2.3-1.2-3.2-3.5-3.5 2.3-.3 3.2-1.2 3.5-3.5z" opacity=".55"/></svg>';
+function showText(text, typing) {
+  const out = panels.ai.querySelector('.s-ai-out'); out.innerHTML = '';
   const p = Object.assign(document.createElement('p'), { className: 'ai-text' }); out.append(p);
-  sfx('land');
-  let i = 0; // the answer writes itself out, a few letters per frame
+  if (!typing) { p.textContent = text; return; }
+  const run = aiRun; let i = 0;
   const step = () => { if (run !== aiRun) return; i = Math.min(text.length, i + 3); p.textContent = text.slice(0, i); if (i < text.length) requestAnimationFrame(step); };
   step();
 }
+// Asks only when there is something new to read; the same day or week is answered from memory.
+async function askAI(force = false) {
+  const out = panels.ai.querySelector('.s-ai-out'), scope = aiScope, run = ++aiRun;
+  const payload = aiPayload(scope), key = JSON.stringify(payload);
+  if (!payload.days.length) { out.innerHTML = `<p class="s-ai-hint">${t('aiEmpty')}</p>`; return; }
+  if (!force && aiCache[scope]?.key === key) return showText(aiCache[scope].text, false);
+  out.innerHTML = `<div class="ai-wave"></div><p class="s-ai-think">${t('aiThinking')}</p>`; out.scrollTop = 0;
+  let text = '', why = 'unreachable', detail = '';
+  try {
+    const r = await fetch('/api/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: payload }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.text) text = j.text;
+    else { why = r.status === 404 ? 'not_deployed' : j.error || 'upstream'; detail = j.detail || ''; }
+  } catch {}
+  if (run !== aiRun || !panels.ai.isConnected) return;
+  if (!text) {
+    const msg = why === 'not_deployed' ? t('aiDeploy') : ['no_key', 'bad_key', 'rate_limited'].includes(why) ? t('why_' + why) : t('aiFail');
+    out.innerHTML = '';
+    const p = Object.assign(document.createElement('p'), { className: 's-ai-hint', textContent: msg + ' ' });
+    if (detail) p.append(Object.assign(document.createElement('small'), { className: 'ai-detail', textContent: detail }));
+    const again = Object.assign(document.createElement('button'), { type: 'button', className: 'ai-again', textContent: t('tryAgain') });
+    again.onclick = () => askAI(true); p.append(again); out.append(p);
+    return;
+  }
+  aiCache[scope] = { key, text };
+  try { localStorage.setItem(AI_KEY, JSON.stringify(aiCache)); } catch {}
+  sfx('land'); showText(text, true);
+}
 
-// ---------- the sheet ----------
-function renderPage(i, animate = true) {
-  const sec = track.children[i];
-  if (i === 0) renderDay(sec, animate);
-  else if (i === 1) renderRange(sec, 7, animate);
-  else if (i === 2) renderRange(sec, 30, animate);
-  else renderAI(sec);
+// ---------- right: trends ----------
+function renderTrend(animate) {
+  const el = panels.trend.querySelector('.pan-c');
+  const T = targets(state.settings), days = lastDays(30), week = days.slice(-7);
+  const logged = days.filter(x => x.tot.kcal > 0), wl = week.filter(x => x.tot.kcal > 0);
+  const avg = (arr, k) => arr.length ? arr.reduce((s, x) => s + x.tot[k], 0) / arr.length : 0;
+  let streak = 0;
+  for (let i = days.length - 1; i >= 0; i--) { if (days[i].tot.kcal > 0) streak++; else if (i < days.length - 1) break; }
+  // a soft area chart of the last 30 days, with the goal as a dashed line
+  const W = 600, H = 60, max = Math.max(T.kcal * 1.25, ...days.map(x => x.tot.kcal));
+  const pts = days.map((x, i) => [(i / (days.length - 1)) * W, H - (x.tot.kcal / max) * (H - 6) - 3]);
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 1; i < pts.length; i++) { const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], cx = (x0 + x1) / 2; d += ` C${cx},${y0} ${cx},${y1} ${x1},${y1}`; }
+  const gy = H - (T.kcal / max) * (H - 6) - 3;
+  el.innerHTML = `
+    <div class="st-l"><div class="st-title">${t('trendTitle')}</div><span class="st-sub">${t('last30')} · ${t('goalWord')} ${num(T.kcal)}</span></div>
+    <svg class="tr-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+      <defs><linearGradient id="trg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--green)" stop-opacity=".32"/><stop offset="1" stop-color="var(--green)" stop-opacity="0"/></linearGradient></defs>
+      <line class="tr-goal" x1="0" x2="${W}" y1="${gy}" y2="${gy}"/>
+      <path class="tr-area" d="${d} L${W},${H} L0,${H} Z"/>
+      <path class="tr-line" pathLength="100" d="${d}"/>
+    </svg>
+    <div class="tr-stats"><div><b><i data-n="${Math.round(avg(wl, 'kcal'))}">0</i></b><span>${t('avg7')}</span></div><div><b><i data-n="${streak}">0</i></b><span>${t('sStreak')}</span></div></div>
+    <div class="tr-macs">${MACROS.map(k => `<div class="m-${k}">${icon(k, 14)}<b><i data-n="${Math.round(avg(wl, k))}">0</i> g</b></div>`).join('')}</div>`;
+  if (!animate) el.querySelector('.tr-line').style.animation = 'none';
+  runCounts(el, !animate);
 }
-function movePill() {
-  const on = el.querySelector('.sum-tabs button.on'), pill = el.querySelector('.sum-tabs .pill');
-  if (on) { pill.style.width = on.offsetWidth + 'px'; pill.style.transform = `translateX(${on.offsetLeft}px)`; }
+
+// ---------- the unfolding ----------
+// Each panel sits behind the bar and is clipped to the bar's exact shape at 0;
+// at 1 it is fully open. Everything in between is drawn straight from the finger.
+let geo = null;
+function measure(kind) {
+  const b = bar.getBoundingClientRect(), vw = innerWidth, vh = innerHeight, bottom = vh - b.bottom;
+  const room = vh - bottom - 76;
+  if (kind === 'up') return { left: b.left, width: b.width, bottom, height: Math.min(room, b.height + 470), b };
+  const width = Math.min(vw - (vw < 700 ? 12 : 40), 1180), left = (vw - width) / 2;
+  return { left, width, bottom, height: b.height, b };
 }
-function go(i, animate = true) {
-  page = Math.max(0, Math.min(PAGES.length - 1, i));
-  el.querySelectorAll('.sum-tabs button').forEach((b, n) => b.classList.toggle('on', n === page));
-  movePill();
-  track.style.transform = `translateX(${-page * 100}%)`;
-  renderPage(page, animate);
+const dist = () => Math.min(300, innerWidth * 0.45);       // how far a sideways pull opens a strip
+const span = () => geo ? geo.height - geo.b.height : 400; // how far an upward pull opens the sheet
+
+function paint(kind, p) {
+  const el = panels[kind]; if (!el || !geo) return;
+  const q = Math.max(0, Math.min(1, p)), k = 1 - q, g = geo, pc = Math.min(p, 1.03);
+  const c = el.querySelector('.pan-c'), f = Math.max(0, Math.min(1, (p - 0.18) / 0.62));
+  el.style.visibility = p > 0.002 ? 'visible' : 'hidden';
+  c.style.opacity = f;
+  if (kind === 'up') {
+    const top = (g.height - g.b.height) * k;
+    el.querySelector('.pan-box').style.clipPath = `inset(${top}px 0px 0px 0px round 24px)`;
+    c.style.transform = `translateY(${(1 - pc) * 46}px)`;
+  } else {
+    // the bar itself stretches out to both sides; what was on it slides away, the strip slides in
+    const L = g.b.left + (g.left - g.b.left) * q, W = g.b.width + (g.width - g.b.width) * q;
+    el.style.left = L + 'px'; el.style.width = W + 'px';
+    c.style.left = (g.left - L) + 'px';
+    const dir = kind === 'ai' ? -1 : 1;
+    c.style.transform = `translateX(${(1 - pc) * -dir * 60}px)`;
+    bar.style.setProperty('--slide', `${dir * Math.min(pc, 1) * 110}px`);
+    bar.style.setProperty('--fade', Math.max(0, 1 - q * 1.8));
+  }
+  bar.style.setProperty('--open', q);
 }
-export function refreshSummary() { if (open) renderPage(page, false); }
-export function closeSummary() { if (!open) return; open = false; el.classList.remove('open'); bar.classList.remove('lifted'); }
-export function openSummary() {
-  if (open) return; open = true;
-  el.style.bottom = (innerHeight - bar.getBoundingClientRect().top + 10) + 'px';
-  el.querySelectorAll('.sum-tabs button').forEach((b, n) => { b.textContent = t(PAGES[n]); });
-  aiBuilt = false;
-  el.classList.remove('open'); void el.offsetWidth; el.classList.add('open'); bar.classList.add('lifted');
-  go(0); sfx('pop');
-  requestAnimationFrame(movePill);
+function place(kind) {
+  geo = measure(kind);
+  const el = panels[kind];
+  Object.assign(el.style, { left: geo.left + 'px', width: geo.width + 'px', bottom: geo.bottom + 'px', height: geo.height + 'px' });
+  if (kind === 'up') el.querySelector('.pan-box').style.paddingBottom = (geo.b.height + 14) + 'px';
+  else { const c = el.querySelector('.pan-c'); c.style.width = geo.width + 'px'; c.style.height = geo.height + 'px'; }
 }
-export const toggleSummary = () => (open ? closeSummary() : openSummary());
+function resetBar(kind) {
+  bar.classList.remove('k-' + kind, 'sided');
+  bar.style.removeProperty('--slide'); bar.style.removeProperty('--fade');
+  if (openKind === kind) { openKind = null; bar.classList.remove('lifted'); bar.style.setProperty('--open', 0); }
+}
+function begin(kind) { // first frame of an opening: fill it, measure it, let the wind blow
+  if (openKind && openKind !== kind) hideNow(openKind);
+  openKind = kind; place(kind);
+  if (kind === 'up') { panels.up.querySelectorAll('.sum-tabs button').forEach((b, n) => { b.textContent = t(PAGES[n]); }); goPage(page, true); }
+  else if (kind === 'ai') renderAI();
+  else renderTrend(true);
+  const el = panels[kind]; el.classList.add('live');
+  el.classList.remove('gust'); void el.offsetWidth; el.classList.add('gust');
+  bar.classList.add('lifted', 'k-' + kind); if (kind !== 'up') bar.classList.add('sided');
+}
+function hideNow(kind) {
+  springs[kind].jump(0); panels[kind].classList.remove('live'); resetBar(kind);
+}
+function settle(kind, target, v = 0) {
+  const sp = springs[kind];
+  sp.v = v; sp.set(target);
+  if (target === 1) { sfx('pop'); if (kind === 'ai') askAI(); }
+}
+export function closeSummary() { if (openKind) settle(openKind, 0); }
+export function openSummary(kind = 'up') { if (openKind !== kind) begin(kind); settle(kind, 1); }
+export function refreshSummary() {
+  if (!openKind || progress < 0.99) return;
+  if (openKind === 'up') goPage(page, false); else if (openKind === 'trend') renderTrend(false); else panels.ai.querySelector('.ai-side').innerHTML = aiSide();
+}
+
+function makePanel(kind) {
+  const el = document.createElement('div'); el.className = 'pan pan-' + kind; el.id = 'pan-' + kind;
+  el.innerHTML = `<div class="pan-box">${kind === 'up' ? WIND_UP : `<svg class="pan-wind side" viewBox="0 0 1000 60" preserveAspectRatio="none" aria-hidden="true"><path pathLength="100" d="M0 14h420c40 0 60-10 100-10s70 12 480 6"/><path pathLength="100" d="M0 30h300c50 0 80 12 130 12s120-14 570-8"/><path pathLength="100" d="M0 46h520c30 0 50-9 80-9s70 8 400 4"/></svg>`}
+    <div class="pan-c">${kind === 'up' ? `<div class="sum-top"><div class="days sum-tabs"><span class="pill"></span>${PAGES.map(() => '<button type="button"></button>').join('')}</div></div>
+      <div class="sum-view"><div class="sum-track">${PAGES.map(() => '<section></section>').join('')}</div></div>` : ''}</div></div>`;
+  document.body.append(el);
+  springs[kind] = new Spring(p => {
+    if (openKind === kind) progress = p;
+    paint(kind, p);
+    if (p <= 0.002 && springs[kind].to === 0 && !drag) { el.classList.remove('live'); resetBar(kind); }
+  }, { stiffness: 210, damping: 24 });
+  springs[kind].jump(0);
+  return el;
+}
+
+// ---------- the gesture ----------
+let drag = null;
+function onDown(ev) {
+  if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+  const src = ev.currentTarget === bar ? 'bar' : 'panel';
+  if (src === 'panel' && ev.target.closest('.ai-seg')) return; // let text be selected and buttons pressed
+  drag = { src, node: ev.currentTarget, id: ev.pointerId, x0: ev.clientX, y0: ev.clientY, axis: null, mode: null, samples: [] };
+}
+function sample(p) { const now = performance.now(); drag.samples.push([now, p]); while (drag.samples.length > 2 && now - drag.samples[0][0] > 90) drag.samples.shift(); }
+function velocity(d) { const s = d.samples; if (s.length < 2) return 0; const [t0, p0] = s[0], [t1, p1] = s[s.length - 1]; return t1 > t0 ? ((p1 - p0) / (t1 - t0)) * 1000 : 0; }
+const rubber = p => (p > 1 ? 1 + (p - 1) * 0.2 : p < 0 ? p * 0.2 : p);
+
+function onMove(ev) {
+  if (!drag || ev.pointerId !== drag.id) return;
+  const dx = ev.clientX - drag.x0, dy = ev.clientY - drag.y0;
+  if (!drag.axis) {
+    if (Math.hypot(dx, dy) < 7) return;
+    drag.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    try { drag.node.setPointerCapture(drag.id); } catch {}
+    if (openKind === 'up' && drag.src === 'panel' && drag.axis === 'x') drag.mode = 'page';
+    else if (openKind && ((openKind === 'up' && drag.axis === 'y') || (openKind !== 'up' && drag.axis === 'x'))) { drag.mode = 'adjust'; drag.kind = openKind; drag.p0 = springs[openKind].x; }
+    else if (!openKind && drag.src === 'bar') drag.mode = drag.axis === 'y' ? 'up' : 'side';
+    else drag.mode = 'none';
+    if (drag.mode !== 'none' && drag.mode !== 'page') document.body.classList.add('pulling');
+  }
+  if (drag.mode === 'up') {
+    if (dy > 0 && !openKind) return;
+    if (openKind !== 'up') begin('up');
+    const p = rubber(-dy / span()); springs.up.jump(p); sample(p);
+  } else if (drag.mode === 'side') {
+    const kind = dx < 0 ? 'ai' : 'trend';
+    if (openKind !== kind) begin(kind);
+    const p = rubber(Math.abs(dx) / dist()); springs[kind].jump(p); sample(p);
+  } else if (drag.mode === 'adjust') {
+    const k = drag.kind;
+    const delta = k === 'up' ? -dy / span() : k === 'ai' ? -dx / dist() : dx / dist();
+    const p = rubber(drag.p0 + delta); springs[k].jump(p); sample(p);
+  } else if (drag.mode === 'page') {
+    const track = panels.up.querySelector('.sum-track'), w = panels.up.offsetWidth || 1;
+    const edge = (page === 0 && dx > 0) || (page === PAGES.length - 1 && dx < 0);
+    track.style.transition = 'none';
+    track.style.transform = `translateX(calc(${-page * 100}% + ${dx * (edge ? 0.25 : 1)}px))`;
+  }
+}
+function onUp(ev) {
+  if (!drag || ev.pointerId !== drag.id) return;
+  const d = drag; drag = null; document.body.classList.remove('pulling');
+  const dx = ev.clientX - d.x0;
+  if (!d.axis) { // a tap
+    if (d.src === 'bar') { if (openKind) closeSummary(); else openSummary('up'); }
+    else if (openKind && openKind !== 'up' && !ev.target.closest('button, .s-ai-out')) closeSummary();
+    return;
+  }
+  if (d.mode === 'page') {
+    const track = panels.up.querySelector('.sum-track'), w = panels.up.offsetWidth || 1;
+    track.style.transition = '';
+    goPage(page + (dx < -w * 0.18 ? 1 : dx > w * 0.18 ? -1 : 0), Math.abs(dx) > w * 0.18);
+    return;
+  }
+  if (!openKind || d.mode === 'none') return;
+  const kind = openKind, sp = springs[kind], p = sp.x, v = velocity(d);
+  const target = p + v * 0.18 > 0.5 ? 1 : 0;
+  settle(kind, target, Math.max(-4, Math.min(4, v)));
+}
 
 export function initSummary() {
   bar = document.getElementById('bar');
-  el = document.createElement('div'); el.className = 'sum'; el.id = 'sum';
-  el.innerHTML = `
-    <svg class="sum-wind" viewBox="0 0 640 60" preserveAspectRatio="none" aria-hidden="true">
-      <path pathLength="100" d="M-20 16h380c40 0 60-12 100-12s60 14 200 8"/>
-      <path pathLength="100" d="M-20 32h260c50 0 70 12 120 12s90-16 300-8"/>
-      <path pathLength="100" d="M-20 48h440c30 0 50-10 80-10s50 8 160 6"/>
-    </svg>
-    <div class="sum-top"><div class="days sum-tabs"><span class="pill"></span>${PAGES.map(() => '<button type="button"></button>').join('')}</div></div>
-    <div class="sum-view"><div class="sum-track">${PAGES.map(() => '<section></section>').join('')}</div></div>`;
-  document.body.append(el);
-  track = el.querySelector('.sum-track');
-  el.querySelectorAll('.sum-tabs button').forEach((b, n) => b.addEventListener('click', () => { if (n !== page) { sfx('pop'); go(n); } }));
-
-  // Swipe sideways to change page (on the sheet or on the bar), up on the bar to open, down to close.
-  const swipe = (node, onBar) => {
-    let x0 = 0, y0 = 0, down = false, moved = false, w = 1;
-    node.addEventListener('pointerdown', ev => { if (ev.target.closest('button') && !onBar) return; down = true; moved = false; x0 = ev.clientX; y0 = ev.clientY; w = el.offsetWidth || 1; });
-    node.addEventListener('pointermove', ev => {
-      if (!down) return;
-      const dx = ev.clientX - x0, dy = ev.clientY - y0;
-      if (!moved && Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-      moved = true;
-      if (open && Math.abs(dx) > Math.abs(dy)) {
-        const edge = (page === 0 && dx > 0) || (page === PAGES.length - 1 && dx < 0);
-        track.style.transition = 'none';
-        track.style.transform = `translateX(calc(${-page * 100}% + ${dx * (edge ? 0.25 : 1)}px))`;
-      }
-    });
-    const end = ev => {
-      if (!down) return; down = false;
-      const dx = ev.clientX - x0, dy = ev.clientY - y0;
-      track.style.transition = '';
-      if (!moved) { if (onBar) toggleSummary(); return; }
-      if (Math.abs(dx) > Math.abs(dy)) { if (open) go(page + (dx < -w * 0.18 ? 1 : dx > w * 0.18 ? -1 : 0), Math.abs(dx) > w * 0.18); }
-      else if (dy < -24 && onBar) openSummary();
-      else if (dy > 40) closeSummary();
-      else if (open) go(page, false);
-    };
-    node.addEventListener('pointerup', end); node.addEventListener('pointercancel', end);
-    node.addEventListener('pointerleave', ev => { if (down && moved) end(ev); });
-  };
-  swipe(el.querySelector('.sum-view'), false); swipe(bar, true);
-  document.addEventListener('pointerdown', ev => { if (open && !ev.target.closest('#sum') && !ev.target.closest('#bar')) closeSummary(); });
+  panels.up = makePanel('up'); panels.ai = makePanel('ai'); panels.trend = makePanel('trend');
+  panels.up.querySelectorAll('.sum-tabs button').forEach((b, n) => b.addEventListener('click', () => { if (n !== page) { sfx('pop'); goPage(n); } }));
+  for (const node of [bar, panels.up, panels.ai, panels.trend]) {
+    node.addEventListener('pointerdown', onDown);
+    node.addEventListener('pointermove', onMove);
+    node.addEventListener('pointerup', onUp);
+    node.addEventListener('pointercancel', onUp);
+  }
+  document.addEventListener('pointerdown', ev => { if (openKind && !ev.target.closest('.pan, #bar, #detail, #toast')) closeSummary(); });
   document.addEventListener('keydown', ev => {
-    if (!open || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) return;
-    if (ev.key === 'ArrowRight') go(page + 1); else if (ev.key === 'ArrowLeft') go(page - 1); else if (ev.key === 'Escape') closeSummary();
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) return;
+    if (ev.key === 'Escape' && openKind) closeSummary();
+    else if (openKind === 'up' && ev.key === 'ArrowRight') goPage(page + 1);
+    else if (openKind === 'up' && ev.key === 'ArrowLeft') goPage(page - 1);
   });
-  addEventListener('resize', () => { if (open) { el.style.bottom = (innerHeight - bar.getBoundingClientRect().top + 10) + 'px'; movePill(); } });
+  addEventListener('resize', () => { if (openKind) { place(openKind); paint(openKind, springs[openKind].x); } });
+  // Show once how the bar works.
+  try {
+    if (!localStorage.getItem('windy.barhint')) setTimeout(() => { toast(t('barHint')); localStorage.setItem('windy.barhint', '1'); }, 1600);
+  } catch {}
 }

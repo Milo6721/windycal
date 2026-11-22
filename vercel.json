@@ -2,11 +2,7 @@
   "functions": {
     "api/estimate.js": {
       "includeFiles": "lib/spec.json",
-      "maxDuration": 30
-    },
-    "api/summary.js": {
-      "includeFiles": "lib/spec.json",
-      "maxDuration": 30
+      "maxDuration": 60
     }
   },
   "headers": [

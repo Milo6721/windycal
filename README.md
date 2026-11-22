@@ -25,6 +25,6 @@ To try another model, add a `GEMINI_MODEL` variable (default is in `lib/spec.jso
 ## Files
 
 - `index.html`, `css/windy.css`, `js/*.js`: the site
-- `api/estimate.js`: the serverless function (Gemini, structured JSON output)
+- `api/estimate.js`: the only serverless function (Gemini): food estimates and the AI summary
 - `lib/spec.json`: the prompt and JSON schema, shared by the function and `dev.py`
 - `sw.js`, `manifest.webmanifest`, `icons/`: installable, works offline

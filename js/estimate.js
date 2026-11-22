@@ -42,7 +42,7 @@ export async function getEstimate(text, lang, fresh = false) {
           return { items, source: 'ai', notFood: !items.length };
         }
         reason = 'bad_output';
-      } else reason = (await r.json().catch(() => ({}))).error || 'upstream';
+      } else { const j = await r.json().catch(() => ({})); reason = j.error || 'upstream'; if (j.detail) console.warn('Windy AI:', j.detail); }
     } catch { reason = 'unreachable'; } finally { clearTimeout(timer); }
   }
 
