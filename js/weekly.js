@@ -1,7 +1,7 @@
 // Weekly: a calendar of one week at a time. Each day shows its total, a small ring against the
 // goal, and the meals you wrote, like the lines on Today. Arrows move between weeks.
-// Below: the week's averages, a short note from the AI coach about your habits, and the chosen
-// day in full (swipe a meal to the left to delete it), with a one-line AI note for that day.
+// Below: the chosen day in full (swipe a meal to the left to delete it), with a one-line AI note.
+// Right-click a day (or press and hold it on a phone) for a quick look at its numbers.
 import { state, keyOf, totalsOf } from './app.js';
 import { t, num, locale, longDate, getLang } from './i18n.js';
 import { targets } from './goal.js';
@@ -9,9 +9,8 @@ import { waterOf, waterOn, waterGoal, glassSVG } from './water.js';
 import { aiPaused } from './estimate.js';
 import { icon, MACROS } from './icons.js';
 
-const SPARK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 3c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z"/><path d="M18.5 14c.3 2.3 1.2 3.2 3.5 3.5-2.3.3-3.2 1.2-3.5 3.5-.3-2.3-1.2-3.2-3.5-3.5 2.3-.3 3.2-1.2 3.5-3.5z" opacity=".55"/></svg>';
 const AI_KEY = 'windy.coach.v1';
-let weekOff = 0, sel = null, root = null, coachT = 0, noteT = 0;
+let weekOff = 0, sel = null, root = null, noteT = 0, shown = [];
 let cache = {};
 try { cache = JSON.parse(localStorage.getItem(AI_KEY) || '{}'); } catch {}
 const keep = () => {
@@ -44,7 +43,6 @@ export function renderWeekly(el) {
   root = el;
   const T = targets(state.settings), days = weekDays(weekOff), today = new Date();
   if (!sel || !days.some(x => x.key === sel)) sel = (days.find(x => sameDay(x.d, today)) || days.find(x => x.entries.length) || days[0]).key;
-  const past = days.filter(x => x.d <= today || sameDay(x.d, today)); // planned days ahead don't count yet
 
   // a ring for each day: how far toward the goal, split into protein, carbs and fat by their calories
   const R = 15, C = 2 * Math.PI * R;
@@ -62,11 +60,6 @@ export function renderWeekly(el) {
   const litres = n => n * 250 >= 1000 ? (n * 0.25).toLocaleString(locale(), { maximumFractionDigits: 2 }) + ' l' : n * 250 + ' ml';
 
   el.innerHTML = `
-    <div class="coach" id="coach">
-      <div class="coach-h"><span class="coach-ic">${SPARK}</span><b>${t('coachTitle')}</b><button type="button" class="coach-re" aria-label="${t('tryAgain')}" title="${t('tryAgain')}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg></button></div>
-      <p class="coach-t"></p>
-    </div>
-
     <div class="wk-nav">
       <button type="button" class="wk-arrow" data-go="-1" aria-label="${t('prevWeek')}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
       <div class="wk-range"><b>${rangeLabel(days)}</b><span>${weekOff === 0 ? t('thisWeekShort') : weekOff === -1 ? t('lastWeek') : days[0].d.getFullYear()}</span></div>
@@ -75,7 +68,7 @@ export function renderWeekly(el) {
     </div>
     <div class="cal">${days.map((x, i) => {
       const isToday = sameDay(x.d, today), future = x.d > today && !isToday, over = x.tot.kcal > T.kcal;
-      return `<button type="button" class="cal-d ${isToday ? 'today' : ''} ${future ? 'future' : ''} ${x.key === sel ? 'sel' : ''} ${over ? 'over' : ''} ${x.tot.kcal ? '' : 'none'}" data-k="${x.key}" style="--i:${i}">
+      return `<button type="button" title="${t('dayPeek')}" class="cal-d ${isToday ? 'today' : ''} ${future ? 'future' : ''} ${x.key === sel ? 'sel' : ''} ${over ? 'over' : ''} ${x.tot.kcal ? '' : 'none'}" data-k="${x.key}" style="--i:${i}">
         <span class="cal-h"><span class="cal-wd">${x.d.toLocaleDateString(locale(), { weekday: 'short' })}</span><span class="cal-n">${x.d.getDate()}</span></span>
         <span class="cal-ring">${donut(x)}<span class="cal-k"><b>${x.tot.kcal ? num(x.tot.kcal) : '–'}</b>${x.tot.kcal ? '<i>kcal</i>' : ''}</span></span>
         <span class="cal-m">${MACROS.map(k => `<span class="m-${k}"><i></i>${x.tot[k]} g</span>`).join('')}</span>
@@ -92,9 +85,8 @@ export function renderWeekly(el) {
     renderWeekly(el);
   }));
   el.querySelectorAll('.cal-d').forEach(c => c.addEventListener('click', () => { sel = c.dataset.k; el.querySelectorAll('.cal-d').forEach(x => x.classList.toggle('sel', x === c)); pickDay(days.find(x => x.key === sel), T, true); }));
-  el.querySelector('.coach-re').addEventListener('click', () => askCoach(past, T, true));
+  shown = days;
   pickDay(days.find(x => x.key === sel), T, false);
-  askCoach(past, T, false);
 }
 
 // ---------- the chosen day ----------
@@ -121,7 +113,7 @@ function pickDay(x, T, animate) {
   askNote(x, T);
 }
 
-// ---------- AI: the coach for the week, a note for the day ----------
+// ---------- AI: a note for the chosen day ----------
 const payloadOf = (days, T) => ({
   lang: getLang(), goal: { kcal: T.kcal, protein: T.protein, carbs: T.carbs, fat: T.fat },
   days: days.filter(x => x.entries.length).map(x => ({
@@ -147,32 +139,6 @@ function show(p, text, typing) {
   step();
 }
 
-// Windy's own words when the AI is not available.
-function ownCoach(days, T) {
-  const d = days.filter(x => x.entries.length), pl = getLang() === 'pl';
-  if (!d.length) return t('coachEmpty');
-  const a = Math.round(d.reduce((s, x) => s + x.tot.kcal, 0) / d.length), p = Math.round(d.reduce((s, x) => s + x.tot.protein, 0) / d.length);
-  const lowP = p < T.protein * 0.8, w = waterOn() ? Math.round(d.reduce((s, x) => s + x.water, 0) / d.length) : null;
-  return pl
-    ? `${d.length} ${d.length === 1 ? 'zapisany dzień' : 'zapisane dni'}, średnio ${num(a)} z ${num(T.kcal)} kcal. ${lowP ? `Białka średnio ${p} g z ${T.protein} g: dodaj coś białkowego do śniadania i kolacji.` : 'Białko trzymasz dobrze.'}${w != null && w < waterGoal() * 0.7 ? ' Pij trochę więcej wody w ciągu dnia.' : ''}`
-    : `${d.length} logged ${d.length === 1 ? 'day' : 'days'}, averaging ${num(a)} of ${num(T.kcal)} kcal. ${lowP ? `Protein averaged ${p} of ${T.protein} g: add something protein-rich to breakfast and dinner.` : 'Your protein is on track.'}${w != null && w < waterGoal() * 0.7 ? ' Try to drink a bit more water through the day.' : ''}`;
-}
-
-function askCoach(days, T, force) {
-  const p = root.querySelector('.coach-t'), box = root.querySelector('#coach'); if (!p) return;
-  const payload = payloadOf(days, T), key = 'c:' + JSON.stringify(payload);
-  if (!payload.days.length) { box.classList.remove('thinking'); show(p, t('coachEmpty'), false); return; }
-  if (!force && cache[key]) { box.classList.remove('thinking'); show(p, cache[key].text, false); return; }
-  show(p, ownCoach(days, T), false); box.classList.add('thinking');
-  clearTimeout(coachT); // wait a moment, so quick edits do not each ask the AI
-  coachT = setTimeout(async () => {
-    const text = await ask('coach', payload);
-    if (!p.isConnected) return;
-    box.classList.remove('thinking');
-    if (text) { cache[key] = { text, at: Date.now() }; keep(); show(p, text, true); }
-  }, force ? 0 : 900);
-}
-
 // Windy's own short read of one day, when the AI is not available.
 function ownNote(x, T) {
   const pl = getLang() === 'pl', k = x.tot.kcal, pct = Math.round((k / T.kcal) * 100), p = x.tot.protein;
@@ -195,3 +161,50 @@ function askNote(x, T) {
     if (text) { cache[key] = { text, at: Date.now() }; keep(); show(p, text, true); } else show(p, ownNote(x, T), false);
   }, 400);
 }
+
+// ---------- a quick look at one day: right-click it, or press and hold on a phone ----------
+const peek = document.createElement('div'); peek.className = 'peek'; peek.setAttribute('role', 'dialog');
+document.body.append(peek);
+let peekT = 0, held = 0;
+export const closePeek = () => { peek.classList.remove('open'); document.querySelector('.cal-d.peeking')?.classList.remove('peeking'); };
+function openPeek(cell, x, y) {
+  const day = shown.find(d => d.key === cell.dataset.k); if (!day) return;
+  const T = targets(state.settings), k = day.tot.kcal, over = k > T.kcal, pct = Math.min(k / T.kcal, 1);
+  const top = day.entries.filter(e => e.items?.length).sort((a, b) => totalsOf([b]).kcal - totalsOf([a]).kcal).slice(0, 3);
+  closePeek(); cell.classList.add('peeking');
+  peek.innerHTML = `
+    <div class="pk-h"><b>${esc(longDate(day.d))}</b><span>${day.entries.length ? `${day.entries.length} ${t(day.entries.length === 1 ? 'pkMeal' : 'pkMeals')}` : t('noEntries')}</span></div>
+    <div class="pk-k ${over ? 'over' : ''}"><b>${num(k)}</b><span>/ ${num(T.kcal)} kcal</span><em>${k ? (over ? t('over', num(k - T.kcal)) : t('left', num(T.kcal - k))) : ''}</em></div>
+    <u class="pk-bar ${over ? 'over' : ''}"><s style="transform:scaleX(${pct})"></s></u>
+    <div class="pk-m">${MACROS.map(m => `<div class="m-${m}"><span>${icon(m, 13)}${t(m)}</span><b>${day.tot[m]}<i> / ${T[m]} g</i></b><u><s style="transform:scaleX(${Math.min(day.tot[m] / T[m], 1)})"></s></u></div>`).join('')}</div>
+    ${waterOn() ? `<div class="pk-w">${glassSVG(Math.min(day.water / waterGoal(), 1))}<span>${t('water')}</span><b>${day.water * 250} / ${waterGoal() * 250} ml</b></div>` : ''}
+    ${top.length ? `<div class="pk-f">${top.map(e => `<div><span>${esc(e.text)}</span><b>${num(totalsOf([e]).kcal)}</b></div>`).join('')}</div>` : ''}`;
+  peek.style.left = '0px'; peek.style.top = '0px'; peek.classList.add('measure');
+  const w = peek.offsetWidth, h = peek.offsetHeight; peek.classList.remove('measure');
+  const r = cell.getBoundingClientRect();
+  // on a phone it sits above (or below) the day you're holding; on a computer at the pointer
+  if (x == null) { x = r.left + r.width / 2 - w / 2; y = r.top - h - 10 < 8 ? r.bottom + 10 : r.top - h - 10; }
+  const left = Math.max(8, Math.min(x, innerWidth - w - 8)), topY = Math.max(8, Math.min(y, innerHeight - h - 8));
+  peek.style.left = left + 'px'; peek.style.top = topY + 'px';
+  peek.style.transformOrigin = `${Math.max(0, Math.min(w, r.left + r.width / 2 - left))}px ${r.top > topY ? h : 0}px`;
+  void peek.offsetWidth; peek.classList.add('open');
+  navigator.vibrate?.(8);
+}
+addEventListener('contextmenu', ev => {
+  const cell = ev.target.closest?.('.weekly .cal-d'); if (!cell) return;
+  ev.preventDefault(); getSelection()?.removeAllRanges();
+  if (Date.now() - held < 700) return; // the long-press already opened it
+  openPeek(cell, ev.clientX + 4, ev.clientY + 4);
+});
+addEventListener('touchstart', ev => {
+  const cell = ev.target.closest?.('.weekly .cal-d'); if (!cell) return;
+  clearTimeout(peekT);
+  peekT = setTimeout(() => { held = Date.now(); openPeek(cell); }, 450);
+}, { passive: true });
+for (const n of ['touchmove', 'touchend', 'touchcancel']) addEventListener(n, () => clearTimeout(peekT), { passive: true });
+// the press that opened it must not also pick the day underneath
+addEventListener('click', ev => { if (Date.now() - held < 700 && ev.target.closest?.('.cal-d')) { ev.stopPropagation(); ev.preventDefault(); } }, true);
+document.addEventListener('pointerdown', ev => { if (peek.classList.contains('open') && !ev.target.closest('.peek') && Date.now() - held > 700) closePeek(); }, true);
+addEventListener('keydown', ev => { if (ev.key === 'Escape') closePeek(); });
+addEventListener('resize', closePeek);
+document.getElementById('scroll')?.addEventListener('scroll', closePeek, { passive: true });

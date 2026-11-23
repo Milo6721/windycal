@@ -38,9 +38,10 @@ const bars = (days, goal, labels) => {
 
 // ---------- up: Day / Week / Month ----------
 function renderDay(sec, animate) {
+  // One glance: what you've eaten against your goal, the three macros, when you ate, and water.
   const T = targets(state.settings), entries = state.days[curKey()] || [], tot = totalsOf(entries);
   for (const k in tot) tot[k] = Math.round(tot[k]);
-  const C = 2 * Math.PI * 52, over = tot.kcal > T.kcal;
+  const over = tot.kcal > T.kcal, pct = Math.round((tot.kcal / T.kcal) * 100);
   const times = { morning: 0, afternoon: 0, evening: 0 };
   let biggest = null;
   for (const e of entries) {
@@ -48,33 +49,37 @@ function renderDay(sec, animate) {
     times[h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening'] += k;
     if (k > 0 && (!biggest || k > biggest.k)) biggest = { k, text: e.text };
   }
-  const tmax = Math.max(1, ...Object.values(times));
+  // the bar is split by where the calories came from, so the macros read at a glance
+  const scale = Math.max(T.kcal, tot.kcal) || 1;
+  const segs = [tot.protein * 4, tot.carbs * 4, tot.fat * 9];
+  const segSum = segs.reduce((a, b) => a + b, 0) || 1, fill = tot.kcal / scale;
+  const esc = x => String(x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   sec.innerHTML = `
-    <div class="s-day">
-      <div class="s-ring ${over ? 'over' : ''}">
-        <svg viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg" cx="60" cy="60" r="52" stroke-dasharray="${C}" stroke-dashoffset="${C}"/></svg>
-        <div class="s-ring-in"><b><i data-n="${tot.kcal}">0</i></b><span>${t('ofGoal', num(T.kcal))}</span></div>
+    <div class="sd">
+      <div class="sd-top">
+        <div class="sd-eaten"><span class="sd-l">${t('coachEaten')}</span><b><i data-n="${tot.kcal}">0</i></b><small>/ ${num(T.kcal)} kcal</small></div>
+        <div class="sd-left ${over ? 'over' : ''}"><span class="sd-l">${over ? t('ringOver') : t('ringLeft')}</span><b><i data-n="${Math.abs(T.kcal - tot.kcal)}">0</i></b><small>${pct}%</small></div>
       </div>
-      <div class="s-macs">${MACROS.map(k => `
-        <div class="s-mac m-${k}"><span class="ic">${icon(k, 18)}</span>
-          <div class="s-mac-t"><span>${t(k)}</span><b><i data-n="${tot[k]}">0</i> / ${T[k]} g</b></div>
-          <u><s style="transform:scaleX(${Math.min(tot[k] / T[k], 1)})"></s></u></div>`).join('')}
+      <div class="sd-bar ${over ? 'over' : ''}">${MACROS.map((k, i) => `<s class="m-${k}" style="flex-grow:${(segs[i] / segSum) * fill};animation-delay:${i * 70}ms"></s>`).join('')}<s class="sd-rest" style="flex-grow:${Math.max(0, 1 - fill)}"></s>${over ? `<em style="left:${(T.kcal / scale) * 100}%"></em>` : ''}</div>
+      <div class="sd-macs">${MACROS.map(k => `
+        <div class="sd-mac m-${k}">
+          <span>${icon(k, 14)}${t(k)}</span>
+          <b><i data-n="${tot[k]}">0</i><small> / ${T[k]} g</small></b>
+          <u><s style="transform:scaleX(${Math.min(tot[k] / T[k], 1)})"></s></u>
+        </div>`).join('')}
       </div>
-    </div>
-    <div class="s-times">${Object.entries(times).map(([k, v]) => `<div><span>${t(k)}</span><b><i data-n="${Math.round(v)}">0</i> kcal</b><u><s style="transform:scaleX(${v / tmax})"></s></u></div>`).join('')}</div>
-    ${waterOn() ? (() => {
-      const k = curKey(), w = waterOf(k), g = waterGoal(), fresh = lastPour.k === k && Date.now() - lastPour.at < 900;
-      return `<div class="s-water"><div class="sw-top"><span class="sw-l">${t('water')}</span><span class="sw-n"><b>${ml(w)}</b> / ${ml(g)}</span></div>
-      <div class="sw-glasses">${Array.from({ length: Math.max(g, w) }, (_, i) => {
-        const filling = fresh && i >= lastPour.from && i < lastPour.to, emptying = fresh && i >= lastPour.to && i < lastPour.from;
-        return `<button type="button" data-g="${i + 1}" aria-label="${ml(i + 1)}">${glassSVG(i < w ? 1 : 0, filling ? 'pour' : emptying ? 'drain' : '')}</button>`;
-      }).join('')}</div></div>`; })() : ''}
-    <p class="s-note">${over ? t('over', num(tot.kcal - T.kcal)) : t('left', num(T.kcal - tot.kcal))}<span></span></p>`;
+      <div class="sd-times">${Object.entries(times).map(([k, v]) => `<div class="${v ? '' : 'none'}"><span>${t(k)}</span><b><i data-n="${Math.round(v)}">0</i></b></div>`).join('')}</div>
+      ${waterOn() ? (() => {
+        const k = curKey(), w = waterOf(k), g = waterGoal(), fresh = lastPour.k === k && Date.now() - lastPour.at < 900;
+        return `<div class="s-water sd-water"><div class="sw-top"><span class="sw-l">${t('water')}</span><span class="sw-n"><b>${ml(w)}</b> / ${ml(g)}</span></div>
+        <div class="sw-glasses">${Array.from({ length: Math.max(g, w) }, (_, i) => {
+          const filling = fresh && i >= lastPour.from && i < lastPour.to, emptying = fresh && i >= lastPour.to && i < lastPour.from;
+          return `<button type="button" data-g="${i + 1}" aria-label="${ml(i + 1)}">${glassSVG(i < w ? 1 : 0, filling ? 'pour' : emptying ? 'drain' : '')}</button>`;
+        }).join('')}</div></div>`; })() : ''}
+      ${biggest ? `<p class="sd-note"><span>${t('biggest')}</span><b>${esc(biggest.text)}</b><em>${num(biggest.k)} kcal</em></p>` : ''}
+    </div>`;
   sec.querySelectorAll('.sw-glasses button').forEach(b => b.addEventListener('click', () => { const g = +b.dataset.g, w = waterOf(curKey()); setWater(curKey(), g === w ? g - 1 : g); }));
-  if (biggest) sec.querySelector('.s-note span').textContent = ` · ${t('biggest')}: ${biggest.text} (${num(biggest.k)} kcal)`;
-  const fg = sec.querySelector('.ring-fg'), frac = Math.min(tot.kcal / T.kcal, 1);
-  const sp = new Spring(x => { fg.style.strokeDashoffset = Math.max(0, C * (1 - x)); }, { stiffness: 90, damping: 12 });
-  animate ? sp.set(frac) : sp.jump(frac);
+  if (!animate) sec.querySelectorAll('.sd-bar s, .sd-mac s').forEach(x => { x.style.animation = 'none'; });
   runCounts(sec, !animate);
 }
 function renderRange(sec, n, animate) {
@@ -268,9 +273,11 @@ function paint(kind, p) {
     c.style.left = (g.left - L) + 'px';
     c.style.transform = `translateX(${(1 - pc) * -dir * 48}px)`;
     c.style.filter = f < 0.98 ? `blur(${(1 - f) * 5}px)` : 'none';
-    bar.style.setProperty('--slide', `${dir * Math.min(pc, 1) * 120}px`);
-    bar.style.setProperty('--fade', Math.max(0, 1 - q * 1.8));
-    bar.style.setProperty('--blur', `${Math.min(q * 2, 1) * 5}px`);
+    // The bar's own numbers step aside without blur and stay inside the bar: a blurred, sliding
+    // protein bar used to smear a pink streak outside the strip on the way back.
+    bar.style.setProperty('--slide', `${dir * Math.max(0, Math.min(pc, 1)) * 36}px`);
+    bar.style.setProperty('--fade', Math.max(0, 1 - q * 3));
+    bar.style.setProperty('--blur', '0px');
   }
   bar.style.setProperty('--open', q);
 }

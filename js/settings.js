@@ -63,6 +63,7 @@ function render() {
   <div class="sec"><h3>${t('extras')}</h3><div class="grp">
     ${row(t('water'), `<button type="button" class="switch ${s.water !== false ? 'on' : ''}" data-act="water" role="switch" aria-checked="${s.water !== false}"><i></i></button>`, t('waterSub'))}
     ${s.water !== false ? row(t('waterGoalLbl'), `<div class="num"><input type="number" inputmode="numeric" data-in="waterGoalMl" value="${waterGoalMl()}" min="250" max="6000" step="250"><i>ml</i></div>`, t('glassIs')) : ''}
+    ${row(t('intel'), `<button type="button" class="switch ${s.intel !== false ? 'on' : ''}" data-act="intel" role="switch" aria-checked="${s.intel !== false}"><i></i></button>`, t('intelSub'))}
     ${row(t('photos'), `<button type="button" class="switch ${s.photos !== false ? 'on' : ''}" data-act="photos" role="switch" aria-checked="${s.photos !== false}"><i></i></button>`, t('photosSub'))}
   </div></div>
 
@@ -122,6 +123,7 @@ export function initSettings() {
     if (b.dataset.act === 'sound') s.sound = s.sound === false;
     else if (b.dataset.act === 'water') s.water = s.water === false;
     else if (b.dataset.act === 'photos') s.photos = s.photos === false;
+    else if (b.dataset.act === 'intel') s.intel = s.intel === false;
     else if (b.dataset.act === 'reset') s.goalOverride = null;
     else if (b.dataset.set === 'sex' || b.dataset.set === 'goal') s.body = { ...(s.body || {}), [b.dataset.set]: b.dataset.v };
     else if (b.dataset.set) s[b.dataset.set] = b.dataset.v;

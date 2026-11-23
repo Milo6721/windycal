@@ -10,7 +10,9 @@ import { waterOf, waterOn, waterGoal, ml } from './water.js';
 import { aiPaused } from './estimate.js';
 import { Spring, sfx } from './fx.js';
 
-const SPARK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 3c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z"/><path d="M18.5 14c.3 2.3 1.2 3.2 3.5 3.5-2.3.3-3.2 1.2-3.5 3.5-.3-2.3-1.2-3.2-3.5-3.5 2.3-.3 3.2-1.2 3.5-3.5z" opacity=".55"/></svg>';
+// Windy's coach mark: a speech bubble with the two wind strokes from the logo
+const MARK = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.6c4.9 0 8.9 3.3 8.9 7.4s-4 7.4-8.9 7.4c-1.1 0-2.1-.2-3.1-.5L4.3 19.7l1.2-3.6C4 14.8 3.1 13 3.1 11c0-4.1 4-7.4 8.9-7.4z"/><path d="M7.6 9.6h5.1a1.5 1.5 0 1 0-1.5-1.5"/><path d="M7.6 12.6h7.6a1.6 1.6 0 1 1-1.6 1.6"/></svg>';
+const AGAIN = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/></svg>';
 const KEY = 'windy.coachday.v1';
 let el, main, spring, open = false, p = 0, enabled = () => true, cache = {}, asking = 0;
 try { cache = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {}
@@ -59,18 +61,20 @@ function own() {
   return parts.join(' ');
 }
 
-function render() {
+function render(force = false) {
   const T = targets(state.settings), d = today(), left = T.kcal - d.tot.kcal, pLeft = Math.max(0, T.protein - d.tot.protein);
   const dt = new Date(); if (curKey() !== keyOf(dt)) dt.setDate(dt.getDate() + (curKey() > keyOf(dt) ? 1 : -1));
   el.querySelector('.co-date').textContent = longDate(dt);
-  el.querySelector('.co-stats').innerHTML = `
-    <div><b>${num(Math.abs(left))}</b><span>${left >= 0 ? t('coachLeftK') : t('ringOver')}</span></div>
-    <div><b>${num(pLeft)} g</b><span>${t('coachLeftP')}</span></div>
-    <div><b>${num(d.tot.kcal)}</b><span>${t('coachEaten')}</span></div>
-    ${waterOn() ? `<div><b>${ml(d.water)}</b><span>${t('water')}</span></div>` : ''}`;
+  // four numbers that matter right now, each with how far along it is
+  const tile = (cls, value, label, frac) => `<div class="co-tile ${cls}"><span>${label}</span><b>${value}</b><u><s style="transform:scaleX(${Math.max(0, Math.min(1, frac))})"></s></u></div>`;
+  el.querySelector('.co-stats').innerHTML =
+    tile(left >= 0 ? 'k' : 'k over', num(Math.abs(left)), left >= 0 ? t('coachLeftK') : `kcal ${t('ringOver')}`, d.tot.kcal / T.kcal)
+    + tile('p m-protein', `${num(pLeft)} g`, t('coachLeftP'), d.tot.protein / T.protein)
+    + tile('e', num(d.tot.kcal), `kcal ${t('coachEaten')}`, d.tot.kcal / T.kcal)
+    + (waterOn() ? tile('w', ml(d.water), t('water'), d.water / waterGoal()) : '');
   const pl = payload(), key = JSON.stringify(pl.days) + pl.lang + JSON.stringify(pl.goal);
   const box = el.querySelector('.co-card'), txt = el.querySelector('.co-text');
-  if (cache.key === key && cache.text) { txt.textContent = cache.text; box.classList.remove('thinking'); return; }
+  if (!force && cache.key === key && cache.text) { txt.textContent = cache.text; box.classList.remove('thinking'); return; }
   txt.textContent = own(); box.classList.add('thinking');
   const run = ++asking;
   (async () => {
@@ -99,13 +103,16 @@ export function initCoach(isEnabled) {
   main = document.getElementById('scroll');
   el = document.createElement('section'); el.className = 'coachpage'; el.id = 'coachpage'; el.setAttribute('aria-label', t('coach'));
   el.innerHTML = `<div class="co-in">
-      <div class="co-head"><span class="co-spark">${SPARK}</span><h2>${t('coach')}</h2></div>
-      <p class="co-date"></p>
-      <div class="co-card"><p class="co-text"></p><i class="co-bar"></i></div>
+      <div class="co-head"><span class="co-av">${MARK}</span><div><h2>${t('coach')}</h2><p class="co-date"></p></div></div>
+      <div class="co-card">
+        <p class="co-text"></p>
+        <div class="co-foot"><span class="co-dots"><i></i><i></i><i></i></span><button type="button" class="co-again">${AGAIN}<span>${t('tryAgain')}</span></button></div>
+      </div>
       <div class="co-stats"></div>
       <p class="co-hint">← ${t('coachSwipe')}</p>
     </div>`;
   document.querySelector('.app').append(el);
+  el.querySelector('.co-again').addEventListener('click', () => { sfx('pop'); render(true); });
   spring = new Spring(x => { paint(x); if (x <= 0.001 && !open) { el.classList.remove('live'); main.style.transform = ''; main.style.opacity = ''; } }, { stiffness: 200, damping: 24 });
   spring.jump(0);
 

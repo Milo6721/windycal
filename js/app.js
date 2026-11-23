@@ -4,14 +4,14 @@ import { getEstimate, aiPaused, clean } from './estimate.js';
 import { targets } from './goal.js';
 import { Spring, countTo, sfx, setSound, toast } from './fx.js';
 import { initSettings, openSettings, closeSettings, settingsOpen } from './settings.js';
-import { renderWeekly } from './weekly.js';
+import { renderWeekly, closePeek } from './weekly.js';
 import { enableSwipe } from './swipe.js';
 import { initSummary, refreshSummary, closeSummary, summaryOpen } from './summary.js';
 import { icon, MACROS } from './icons.js';
 import { initWater, paintWater } from './water.js';
 import { initTip, renderTip } from './tip.js';
 import { initSync } from './sync.js';
-import { openScanner } from './barcode.js';
+import { complete, relearn } from './intel.js';
 import { initCoach, toggleCoach, closeCoach, coachOpen } from './coach.js';
 
 const $ = id => document.getElementById(id);
@@ -19,7 +19,6 @@ const KEY = 'windy.v1';
 const RING = 125.66;
 const SPARK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 3c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z"/><path d="M18.5 14c.3 2.3 1.2 3.2 3.5 3.5-2.3.3-3.2 1.2-3.5 3.5-.3-2.3-1.2-3.2-3.5-3.5 2.3-.3 3.2-1.2 3.5-3.5z" opacity=".55"/></svg>';
 const CAM = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.7l1.3-2h5l1.3 2h1.7A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z"/><circle cx="12" cy="12.5" r="3.4"/></svg>';
-const SCAN = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 8v8M11 8v8M14 8v8M17 8v8" stroke-width="1.5"/></svg>';
 const TRASH = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9.5 7V5h5v2"/><path d="M6.5 7l1 12a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2l1-12"/></svg>';
 const MIC = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0"/><path d="M12 17.5V21"/></svg>';
 
@@ -97,9 +96,10 @@ function makeRow(e) {
     <div class="l">
       <textarea class="txt" rows="1" spellcheck="false" autocomplete="off" autocapitalize="off" enterkeyhint="done"></textarea>
       <div class="sub"><i class="dot"></i><span></span></div>
-      <div class="tools"><button class="tool cam" type="button" aria-haspopup="menu">${CAM}</button><button class="tool mic" type="button">${MIC}</button></div>
+      <div class="tools"><button class="tool cam" type="button">${CAM}</button><button class="tool mic" type="button">${MIC}</button></div>
       <button class="x" type="button" tabindex="-1">${TRASH}</button>
     </div>
+    <i class="beam" aria-hidden="true"></i>
     <button class="r" type="button" tabindex="-1">
       <span class="kcal"><b>0</b><small>kcal</small></span>
       <span class="macs">${t('pcf').map((l, i) => `<em class="m-${MACROS[i]}">${l}</em> <i>0</i>`).join(' · ')}</span>
@@ -111,14 +111,13 @@ function makeRow(e) {
   ta.placeholder = e ? '' : t(view === 'tomorrow' ? 'placeholderTomorrow' : view === 'yesterday' ? 'placeholderYesterday' : 'placeholder');
   row.querySelector('.mic').title = t('dictate'); row.querySelector('.mic').setAttribute('aria-label', t('dictate'));
   const cam = row.querySelector('.cam'); cam.title = t('takePhoto'); cam.setAttribute('aria-label', t('takePhoto'));
-  cam.title = t('camTitle'); cam.setAttribute('aria-label', t('camTitle'));
-  cam.addEventListener('click', ev => { ev.stopPropagation(); camMenu(cam); });
+  cam.addEventListener('click', ev => { ev.stopPropagation(); pickPhoto(); });
   row.classList.toggle('no-cam', state.settings.photos === false);
 
   ta.addEventListener('input', () => {
     fit(ta); updateHint();
     clearTimeout(row._t);
-    if (ta.value.trim().length >= 2) row._t = setTimeout(() => commit(row), 1400); // a short pause finishes the line
+    if (ta.value.trim().length >= 2) row._t = setTimeout(() => { if (!ghostFor(ta)) commit(row); }, 1400); // a short pause finishes the line (not while a suggestion waits)
   });
   ta.addEventListener('keydown', ev => onKey(ev, row, ta));
   ta.addEventListener('blur', () => { if (!rendering && row.isConnected) { clearTimeout(row._t); commit(row); } });
@@ -141,6 +140,12 @@ const focusRow = (row, end = true) => { if (!row) return; const ta = row.querySe
 
 function onKey(ev, row, ta) {
   if (ev.isComposing) return;
+  // Windy Intelligence: Enter takes the grey suggestion and adds the food; Tab or → just fills it in
+  if (ghostFor(ta)) {
+    if (ev.key === 'Tab' || (ev.key === 'ArrowRight' && ta.selectionEnd === ta.value.length)) { ev.preventDefault(); acceptGhost(ta); return; }
+    if (ev.key === 'Enter') acceptGhost(ta, false);
+    else if (ev.key === 'Escape') { ev.preventDefault(); ghost._off = ta.value; hideGhost(); return; }
+  }
   if (ev.key === 'Enter') {
     ev.preventDefault(); clearTimeout(row._t);
     const next = siblingRow(row, 1);
@@ -386,33 +391,6 @@ async function estimatePhoto(e, data) {
   refreshAll(); paintDetail(true);
 }
 
-// ---------- the camera button: a small menu with "Photo of a meal" and "Scan a barcode" ----------
-const cm = document.createElement('div'); cm.className = 'cam-menu'; cm.setAttribute('role', 'menu'); document.body.append(cm);
-function camMenu(btn) {
-  if (cm.classList.contains('open')) return cm.classList.remove('open');
-  cm.innerHTML = `<button type="button" role="menuitem" data-c="photo">${CAM}<span>${t('takePhoto')}</span></button><button type="button" role="menuitem" data-c="scan">${SCAN}<span>${t('scanTitle')}</span><em class="wip" title="${t('wipTitle')}">!</em></button>`;
-  const r = btn.getBoundingClientRect();
-  cm.style.right = Math.max(8, innerWidth - r.right) + 'px'; cm.style.bottom = (innerHeight - r.top + 8) + 'px';
-  cm.classList.add('open'); cm.querySelector('button').focus();
-}
-cm.addEventListener('click', ev => { const b = ev.target.closest('button'); if (!b) return; cm.classList.remove('open'); if (b.dataset.c === 'photo') pickPhoto(); else openScanner(addProduct); });
-cm.addEventListener('keydown', ev => {
-  const items = [...cm.querySelectorAll('button')], i = items.indexOf(document.activeElement);
-  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') { ev.preventDefault(); items[(i + (ev.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus(); }
-  else if (ev.key === 'Escape') cm.classList.remove('open');
-});
-document.addEventListener('pointerdown', ev => { if (!ev.target.closest('.cam-menu, .cam')) cm.classList.remove('open'); });
-
-// ---------- a product from its barcode ----------
-function addProduct(p) {
-  pushUndo();
-  const e = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text: p.name, ts: Date.now(), status: 'done', items: [p.item], mult: 1, barcode: p.code };
-  if (view === 'tomorrow') e.planned = true;
-  list(curKey()).push(e);
-  save(); renderLog(); refreshAll(); sfx('land');
-  const row = rows.get(e.id); if (row) { row.classList.add('landed', 'arrived'); setTimeout(() => row.classList.remove('arrived'), 1400); }
-}
-
 // ---------- dictation ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null;
@@ -495,7 +473,7 @@ function setView(v, swap = true) {
   movePill();
   $('log').hidden = v === 'weekly'; $('weekly').hidden = v !== 'weekly';
   $('bar').classList.toggle('away', v === 'weekly');
-  closeDetail(); if (v === 'weekly') { closeSummary(); closeCoach(); }
+  closeDetail(); closePeek(); if (v === 'weekly') { closeSummary(); closeCoach(); }
   renderHead(swap);
   if (v === 'weekly') renderWeekly($('weekly'));
   else { renderLog(); renderTotals(); }
@@ -618,6 +596,7 @@ function paintDetail(landed = false) {
   // ingredients, each with its own weight that can be changed
   const ib = card.querySelector('.dv-ings');
   const focusedIdx = document.activeElement?.closest?.('.dv-ing')?.dataset.i;
+  const typingIdx = document.activeElement?.matches?.('.dv-ing input') ? focusedIdx : null; // only a field being typed in keeps its value; a focused +/− button must not
   if (focusedIdx == null || ib.children.length !== items.length) {
     ib.innerHTML = items.length ? items.map((it, i) => `
       <div class="dv-ing" data-i="${i}">
@@ -626,7 +605,7 @@ function paintDetail(landed = false) {
         <b class="dv-ik">${num(it.calories * m)}</b>
       </div>`).join('') : `<p class="dv-none">${thinking ? t('estimating') : t('noIngredients')}</p>`;
   } else {
-    ib.querySelectorAll('.dv-ing').forEach((row, i) => { if (String(i) !== focusedIdx && items[i]) row.querySelector('input').value = Math.round(items[i].grams * m); if (items[i]) row.querySelector('.dv-ik').textContent = num(items[i].calories * m); });
+    ib.querySelectorAll('.dv-ing').forEach((row, i) => { if (String(i) !== typingIdx && items[i]) row.querySelector('input').value = Math.round(items[i].grams * m); if (items[i]) row.querySelector('.dv-ik').textContent = num(items[i].calories * m); });
   }
   const onToday = (state.days[dayKey(0)] || []).includes(e);
   card.querySelector('[data-act=move] span').textContent = t(onToday ? 'mToTomorrow' : 'mToToday');
@@ -636,7 +615,7 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 
 function openDetail(row) {
   const e = row._e && locate(row._e.id); if (!e) return;
-  closeSummary(); cm.classList.remove('open');
+  closeSummary();
   if (cur) cur.classList.remove('picked');
   document.activeElement?.blur?.();
   cur = row; row.classList.add('picked'); editing = false;
@@ -760,7 +739,7 @@ let ctxRow = null;
 const closeCtx = () => { ctx.classList.remove('open'); ctxRow?.classList.remove('ctx-on'); ctxRow = null; };
 function openCtx(row, x, y) {
   const e = row._e && locate(row._e.id); if (!e) return;
-  closeCtx(); cm.classList.remove('open');
+  closeCtx(); getSelection()?.removeAllRanges();
   ctxRow = row; row.classList.add('ctx-on');
   const onToday = (state.days[dayKey(0)] || []).includes(e);
   const item = (a, label, cls = '') => `<button type="button" role="menuitem" class="${cls}" data-a="${a}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICO[a]}</svg><span>${label}</span></button>`;
@@ -809,6 +788,13 @@ document.addEventListener('pointerdown', ev => { if (ctx.classList.contains('ope
 addEventListener('blur', closeCtx); addEventListener('resize', closeCtx);
 $('scroll').addEventListener('scroll', closeCtx, { passive: true });
 
+// a right-click on a food line never selects its words (they would turn blue under the menu)
+$('log').addEventListener('mousedown', ev => {
+  if (ev.button !== 2) return;
+  const row = ev.target.closest('.row:not(.draft):not(.out)'); if (!row || !row._e) return;
+  if (ev.target.closest('textarea') && document.activeElement === ev.target) return;
+  ev.preventDefault();
+});
 // only food lines get Windy's menu; the line you are typing in keeps the normal one
 $('log').addEventListener('contextmenu', ev => {
   const row = ev.target.closest('.row:not(.draft):not(.out)'); if (!row || !row._e) return;
@@ -850,6 +836,39 @@ document.addEventListener('selectionchange', () => placeCaret(false));
 document.addEventListener('input', ev => { if (ev.target.classList?.contains('txt')) placeCaret(true); });
 document.addEventListener('focusout', () => setTimeout(() => placeCaret(false), 0));
 $('scroll').addEventListener('scroll', () => placeCaret(false), { passive: true });
+
+// ---------- Windy Intelligence: the rest of a food you've written before, in grey after the cursor ----------
+const ghost = document.createElement('div'); ghost.className = 'ghost'; ghost.setAttribute('aria-hidden', 'true');
+ghost.innerHTML = '<span class="g-typed"></span><span class="g-rest"></span><kbd class="g-key">↵</kbd>';
+const ghostFor = ta => !ghost.hidden && ghost._ta === ta && ghost._s;
+function hideGhost() { ghost.hidden = true; ghost._s = ''; ghost._ta = null; }
+hideGhost();
+function updateGhost() {
+  const ta = document.activeElement;
+  if (!ta?.classList?.contains('txt') || state.settings.intel === false || ta.selectionStart !== ta.selectionEnd || ta.selectionEnd !== ta.value.length
+    || ta.closest('.row.thinking') || ghost._off === ta.value) return hideGhost();
+  ghost._off = null;
+  const rest = complete(state.days, ta.value);
+  if (!rest) return hideGhost();
+  const cs = getComputedStyle(ta), host = ta.parentElement;
+  if (ghost.parentElement !== host) host.append(ghost);
+  Object.assign(ghost.style, { font: cs.font, letterSpacing: cs.letterSpacing, padding: cs.padding, left: ta.offsetLeft + 'px', top: ta.offsetTop + 'px', width: ta.offsetWidth + 'px' });
+  ghost.querySelector('.g-typed').textContent = ta.value;
+  ghost.querySelector('.g-rest').textContent = rest;
+  ghost._s = rest; ghost._ta = ta; ghost.hidden = false;
+}
+function acceptGhost(ta, typing = true) {
+  const rest = ghost._s; hideGhost(); if (!rest) return;
+  ta.value += rest; fit(ta); ta.setSelectionRange(ta.value.length, ta.value.length);
+  sfx('pop');
+  if (typing) ta.dispatchEvent(new Event('input', { bubbles: true })); // keep going: maybe there's more to suggest
+}
+// a tap on the grey words takes them (on a phone there's no Tab key)
+ghost.addEventListener('pointerdown', ev => { if (!ev.target.closest('.g-rest, .g-key')) return; ev.preventDefault(); const ta = ghost._ta; if (ta) acceptGhost(ta); });
+document.addEventListener('input', ev => { if (ev.target.classList?.contains('txt')) updateGhost(); });
+document.addEventListener('selectionchange', updateGhost);
+document.addEventListener('focusout', () => setTimeout(updateGhost, 0));
+addEventListener('windy:saved', relearn); addEventListener('windy:synced', relearn);
 
 // ---------- wiring ----------
 $('days').addEventListener('click', ev => { const b = ev.target.closest('button'); if (b && b.dataset.view !== view) { sfx('pop'); setView(b.dataset.view); } });
